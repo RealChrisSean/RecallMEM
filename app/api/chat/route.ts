@@ -1,0 +1,107 @@
+import { NextRequest } from "next/server";
+import { chatStream, type ModelMode, type ChatMessage } from "@/lib/llm";
+import { createChat, updateChat, getChat } from "@/lib/chats";
+import { buildMemoryAwareSystemPrompt } from "@/lib/memory";
+import type { Message } from "@/lib/types";
+
+export const runtime = "nodejs";
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = (await req.json()) as {
+      messages: Message[];
+      mode?: ModelMode;
+      chatId?: string;
+      model?: string;
+    };
+
+    if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
+      return new Response(JSON.stringify({ error: "messages array required" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const mode: ModelMode = body.mode || "standard";
+
+    // Get or create chat row
+    let chatId = body.chatId;
+    if (chatId) {
+      const existing = await getChat(chatId);
+      if (!existing) chatId = undefined;
+    }
+    if (!chatId) {
+      chatId = await createChat(mode);
+    }
+
+    // Build memory-aware system prompt using the latest user message for vector search
+    const latestUserMessage = body.messages[body.messages.length - 1];
+    const systemPromptText = await buildMemoryAwareSystemPrompt(
+      latestUserMessage.content,
+      chatId
+    );
+
+    const llmMessages: ChatMessage[] = [
+      { role: "system", content: systemPromptText },
+      ...body.messages.map((m) => ({ role: m.role, content: m.content })),
+    ];
+
+    // Stream the response back as Server-Sent Events
+    const encoder = new TextEncoder();
+    let assistantContent = "";
+    const finalChatId = chatId;
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        // Send the chat_id first so the client can track it
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ chatId: finalChatId })}\n\n`)
+        );
+
+        try {
+          for await (const chunk of chatStream(llmMessages, { mode, model: body.model })) {
+            if (chunk.delta) {
+              assistantContent += chunk.delta;
+              const data = JSON.stringify({ delta: chunk.delta });
+              controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+            }
+            if (chunk.done) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+              controller.close();
+
+              // Save updated chat with the new assistant message
+              const fullMessages: Message[] = [
+                ...body.messages,
+                { role: "assistant", content: assistantContent },
+              ];
+              await updateChat(finalChatId, fullMessages);
+              // Memory persistence happens via /api/chat/finalize when the user
+              // ends the conversation (clicks New chat or closes the tab).
+              return;
+            }
+          }
+          controller.close();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          const errChunk = JSON.stringify({ error: message, done: true });
+          controller.enqueue(encoder.encode(`data: ${errChunk}\n\n`));
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return new Response(JSON.stringify({ error: message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+}
