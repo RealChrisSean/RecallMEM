@@ -76,6 +76,7 @@ async function setupCommand(opts = {}) {
     silent = false,
     skipIfDone = false,
     installPath = process.cwd(),
+    devMode = false,
   } = opts;
   const ENV_PATH = path.join(installPath, ".env.local");
 
@@ -253,6 +254,37 @@ async function setupCommand(opts = {}) {
   const existedBefore = fs.existsSync(ENV_PATH);
   writeEnv(ENV_PATH, finalEnv);
   success(`.env.local ${existedBefore ? "updated" : "created"}`);
+
+  // ─── Step 12: Production build (skipped in dev mode) ──────────────────
+  // End users get a production build for speed and to avoid dev-mode hot-reload
+  // hydration warnings. Developers in their own checkout (devMode=true) skip the
+  // build so they get hot reload via `next dev`.
+  if (!devMode) {
+    const hasBuild = fs.existsSync(
+      path.join(installPath, ".next", "BUILD_ID")
+    );
+    if (!hasBuild) {
+      section("Building app for production");
+      info("This takes about 30-60 seconds, but only on the first install.");
+      try {
+        const buildResult = spawnSync("npx", ["next", "build"], {
+          cwd: installPath,
+          stdio: silent ? "pipe" : "inherit",
+          env: { ...process.env, ...finalEnv },
+        });
+        if (buildResult.status !== 0) {
+          warn("Production build failed, will fall back to dev mode at runtime");
+        } else {
+          success("Production build complete");
+        }
+      } catch (err) {
+        warn(`Build failed: ${err.message}`);
+        info("Falling back to dev mode at runtime");
+      }
+    } else {
+      success("Production build already exists");
+    }
+  }
 
   blank();
   success(color.bold("Setup complete!"));

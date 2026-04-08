@@ -6,7 +6,17 @@
 </p>
 
 <p align="center">
-  Your own private AI chatbot. Runs on your machine. Remembers everything you've ever told it. Nothing leaves your computer.
+  <strong>Persistent personal AI.</strong> Powered by Gemma 4 running locally on your own machine.
+  <br>
+  Not a chatbot (chatbots forget you). Not an agent (agents don't remember you). A private AI you have an ongoing relationship with, built on a deterministic memory framework where the LLM never touches your data.
+</p>
+
+<p align="center">
+  Two products in one repo:
+  <br>
+  <strong>👤 For users:</strong> install with <code>npx recallmem</code> and start chatting with an AI that actually remembers you.
+  <br>
+  <strong>👨‍💻 For developers:</strong> fork it and build your own AI app on top of the memory framework in <code>lib/</code>.
 </p>
 
 ```bash
@@ -31,6 +41,8 @@ Here's the problem with every "private AI" tool I tried: they all fall into one 
 
 There's a gap right in the middle: a **complete personal AI app with real working memory that runs 100% on your machine**. So I built it.
 
+The default model is **Gemma 4** (Google's open weights model that just dropped, Apache 2.0) running locally via Ollama. You can pick any size from E2B (runs on a phone) up to the 31B Dense (best quality, needs a workstation). Or skip Ollama entirely and bring your own API key for Claude, GPT, Groq, Together, OpenRouter, or anything OpenAI-compatible. Your call.
+
 The thing is, the memory is the actual differentiator. Not the model. Not the UI. The memory. The AI builds a profile of who you are over time. It extracts facts after every conversation. It vector-searches across every chat you've ever had to find relevant context. By the time you've used it for a week, it knows you better than ChatGPT ever will, because ChatGPT forgets you the second you close the tab.
 
 ---
@@ -39,20 +51,136 @@ The thing is, the memory is the actual differentiator. Not the model. Not the UI
 
 Here's the honest comparison. I'll list real competitors by name.
 
-| | RecallMEM | ChatGPT | Claude.ai | Open WebUI | Mem0 |
-|---|---|---|---|---|---|
-| **Runs locally** | ✅ | ❌ | ❌ | ✅ | ❌ |
-| **Persistent memory across chats** | ✅ | partial | partial | ❌ | ✅ |
-| **You can edit / delete memories** | ✅ | partial | ❌ | ❌ | ✅ |
-| **Vector search over past chats** | ✅ | ❌ | ❌ | ❌ | ✅ |
-| **Custom rules / behavior** | ✅ | ✅ | ✅ | ❌ | ❌ |
-| **Bring your own LLM (any provider)** | ✅ | ❌ | ❌ | partial | ❌ |
-| **Use local models (Gemma 4, Llama, etc)** | ✅ | ❌ | ❌ | ✅ | ❌ |
-| **No account / no signup** | ✅ | ❌ | ❌ | ✅ | ❌ |
-| **Free** | ✅ | partial | partial | ✅ | partial |
-| **Source available** | ✅ Apache 2.0 | ❌ | ❌ | ✅ | partial |
+| | RecallMEM | ChatGPT / Claude.ai | Mem0 |
+|---|---|---|---|
+| **Runs locally** | ✅ | ❌ | ❌ |
+| **Memory retrieval is deterministic (no LLM tool calls)** | ✅ | ❌ | ❌ |
+| **Persistent memory across chats** | ✅ | partial | ✅ |
+| **You can edit / delete memories** | ✅ | partial | ✅ |
+| **Vector search over past chats** | ✅ | ❌ | ✅ |
+| **Custom rules / behavior** | ✅ | ✅ | ❌ |
+| **Bring your own LLM (any provider)** | ✅ | ❌ | ❌ |
+| **Use local models (Gemma 4, Llama, etc)** | ✅ | ❌ | ❌ |
+| **No account / no signup** | ✅ | ❌ | ❌ |
+| **Free** | ✅ | partial | partial |
+| **Source available** | ✅ Apache 2.0 | ❌ | partial |
 
-The closest thing is **Open WebUI** in terms of polish, but Open WebUI has zero real memory architecture. They have multi-user chat and a slick UI, but no fact extraction, no profile synthesis, no semantic recall over past conversations. Think of RecallMEM as "Open WebUI but it actually remembers you."
+## The actual differentiator nobody talks about
+
+The thing nobody is doing right is **how memory is read and written**.
+
+In ChatGPT and Claude.ai with memory turned on, the LLM is in charge of memory. The model decides when to remember something during your conversation. The model decides what to remember. The model decides what to retrieve when you ask a question. The whole memory layer is implemented as model behavior. You're trusting the LLM to be a librarian, and LLMs are not librarians. They hallucinate.
+
+RecallMEM does it backwards. **The chat LLM never touches your memory database.** Not for reads, not for writes. The LLM only ever sees a system prompt that's already been assembled by deterministic TypeScript and SQL. Here's the actual flow:
+
+**When you send a message (memory READ path, 100% deterministic):**
+
+1. Plain SQL `SELECT` pulls your profile from `s2m_user_profiles`
+2. Plain SQL `SELECT` pulls your top facts from `s2m_user_facts`
+3. EmbeddingGemma converts your message to a 768-dim vector (math, not generation)
+4. pgvector cosine similarity search ranks chunks from past conversations
+5. TypeScript template assembles all of it into a system prompt
+6. **Then** the chat LLM gets called, with the assembled context already in its prompt
+
+The chat LLM never queries the database. It can't decide what to retrieve. It can't pick which facts are relevant. It can't hallucinate a memory that doesn't exist, because if it's not in the prompt, it doesn't exist for the model. The retrieval is 100% deterministic SQL + cosine similarity. No LLM tool calls touching your memory store.
+
+**When a chat ends (memory WRITE path, LLM proposes, TypeScript validates):**
+
+The post-chat pipeline calls a small LLM (Gemma 4 E4B) to extract candidate facts from the transcript. But here's the key: the LLM only **proposes** facts. It cannot write them to the database. The TypeScript layer is the actual gatekeeper, and it runs every candidate fact through six validation steps before storage:
+
+1. **Quality gate.** Conversations under 100 characters get zero facts extracted. The LLM never even sees them.
+2. **JSON parse validation.** If the LLM returns malformed JSON or no array, the entire batch is dropped.
+3. **Type validation.** Only strings survive. Objects, numbers, nested arrays, all rejected.
+4. **Garbage pattern filtering.** A regex filter catches the most common LLM hallucinations: meta-observations like "user asked about X", AI behavior notes like "AI suggested Y", non-facts like "not mentioned", mood observations like "had a good conversation", and anything under 10 characters.
+5. **Deduplication.** Case-insensitive normalized match against the entire facts table. Duplicates get dropped.
+6. **Categorization.** The category (Identity, Family, Work, Health, etc.) is decided by **keyword matching in TypeScript**, not by the LLM. The LLM has no say in how facts get organized.
+
+After all six steps, the surviving facts get a plain SQL `INSERT`. And even then, you can edit or delete any fact in the Memory page if you don't agree with it.
+
+**Why this matters:**
+
+- **Predictability.** When you mention "my dog" in a chat, RecallMEM **always** retrieves the facts that match "dog" via cosine similarity. ChatGPT retrieves whatever the model decides to retrieve, which can vary run to run.
+- **No hallucinated retrieval.** The LLM cannot remember something that isn't actually in your facts table. If it's not in the database, it's not in the prompt.
+- **Auditability.** You can look at any chat and trace exactly which facts and chunks were loaded into the system prompt. With ChatGPT, you can't see what the model decided to surface from memory.
+- **No prompt injection memory leaks.** The LLM in RecallMEM only sees what the deterministic layer feeds it. It can't query the rest of the database. With ChatGPT, the model has tool access to memory, which means a prompt injection attack could theoretically make it dump memory contents.
+- **Your data, your database.** Memory is data you control, not behavior you have to trust the model to do correctly. You can write a script that queries Postgres directly, edit facts manually, run analytics on your own conversations.
+
+This is the actual reason RecallMEM exists. Not "another local chat UI." A memory architecture where the LLM is intentionally not in charge.
+
+---
+
+## The memory framework underneath (for developers)
+
+If you're a developer reading this, here's the part that should interest you. Underneath the chat UI, RecallMEM is a **deterministic memory framework** you can fork and use in your own AI app. The whole `lib/` folder is intentionally framework-shaped. It's not a polished SDK with a public API contract, but it IS a working, opinionated memory architecture that you can copy into your own project and adapt.
+
+**The core files in `lib/`:**
+
+```
+lib/
+├── memory.ts        Memory orchestrator. Loads profile + facts + vector recall in parallel.
+├── prompts.ts       Assembles the system prompt with all the memory context.
+├── facts.ts         Fact extraction (LLM proposes) + validation (TypeScript decides).
+├── profile.ts       Synthesizes a structured profile from the active facts.
+├── chunks.ts        Splits transcripts into chunks, embeds them, runs vector search.
+├── chats.ts         Chat CRUD + transcript serialization with the smart parser.
+├── post-chat.ts     The post-chat pipeline (title gen, fact extract, profile rebuild, embed).
+├── rules.ts         Custom user rules / instructions.
+├── embeddings.ts    EmbeddingGemma calls via Ollama.
+├── llm.ts           LLM router (Ollama, Anthropic, OpenAI, OpenAI-compatible).
+└── db.ts            Postgres pool + the configurable user ID resolver.
+```
+
+**Embedding it into your own app:**
+
+The lib functions default to a single-user setup (`user_id = "local-user"`) but you can wire in your own auth system with two function calls at startup:
+
+```typescript
+import { Pool } from "pg";
+import { configureDb, setUserIdResolver } from "./lib/db";
+
+// Use your existing Postgres pool (or skip this and let lib/ create its own)
+const myPool = new Pool({ connectionString: process.env.DATABASE_URL });
+configureDb({ pool: myPool });
+
+// Wire in your auth system. Called whenever a lib function needs the current user.
+// Can be sync or async. Return whatever string identifies the user in your app.
+setUserIdResolver(() => getCurrentUserFromMyAuthSystem());
+```
+
+That's it. No other changes needed. Every lib function (`getProfile`, `getActiveFacts`, `searchChunks`, `storeFacts`, `rebuildProfile`, etc.) reads from the configured resolver. Your auth system stays in your code, the memory framework stays in `lib/`.
+
+**Using the memory layer in a chat request:**
+
+```typescript
+import { buildMemoryAwareSystemPrompt } from "./lib/memory";
+import { runPostChatPipeline } from "./lib/post-chat";
+import { createChat, updateChat } from "./lib/chats";
+
+// 1. Build the system prompt from the user's memory
+const systemPrompt = await buildMemoryAwareSystemPrompt(
+  userMessage,
+  currentChatId
+);
+
+// 2. Send to your LLM however you want (Ollama, Claude, GPT, whatever)
+const response = await yourLLM.chat([
+  { role: "system", content: systemPrompt },
+  ...conversationHistory,
+  { role: "user", content: userMessage },
+]);
+
+// 3. Save the chat
+await updateChat(chatId, [...conversationHistory, { role: "assistant", content: response }]);
+
+// 4. (Async) Run the post-chat pipeline to extract facts, rebuild profile, embed chunks
+runPostChatPipeline(chatId);
+```
+
+The memory framework doesn't care which LLM you use. It just assembles context. Bring your own model.
+
+**The schema lives in `migrations/001_init.sql`.** Run it against any Postgres 17+ database with the pgvector extension installed. Tables are prefixed `s2m_` (for "speak2me," the project this came from). Rename them in the migration if you want a different prefix.
+
+**License:** Apache 2.0. Fork it, modify it, ship it commercially. The only ask is that you preserve the copyright notice and the NOTICE file. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full guide on using the framework in your own app.
 
 ---
 

@@ -1,7 +1,5 @@
-import { query, toVectorString } from "@/lib/db";
+import { query, toVectorString, getUserId } from "@/lib/db";
 import { embed, embedBatch } from "@/lib/embeddings";
-
-const USER_ID = "local-user";
 
 // Split a transcript into ~1000 char chunks at sentence/message boundaries
 export function chunkTranscript(transcript: string, maxChars = 1000): string[] {
@@ -29,6 +27,7 @@ export async function embedAndStoreChunks(
   chatId: string,
   transcript: string
 ): Promise<number> {
+  const userId = await getUserId();
   const chunks = chunkTranscript(transcript);
   if (chunks.length === 0) return 0;
 
@@ -43,7 +42,7 @@ export async function embedAndStoreChunks(
     await query(
       `INSERT INTO s2m_transcript_chunks (user_id, chat_id, chunk_text, chunk_index, embedding)
        VALUES ($1, $2, $3, $4, $5::vector)`,
-      [USER_ID, chatId, chunks[i], i, toVectorString(embeddings[i])]
+      [userId, chatId, chunks[i], i, toVectorString(embeddings[i])]
     );
   }
   return chunks.length;
@@ -55,6 +54,7 @@ export async function searchChunks(
   excludeChatId: string | null = null,
   limit = 5
 ): Promise<{ chunk_text: string; distance: number; chat_id: string }[]> {
+  const userId = await getUserId();
   const queryEmbedding = await embed(queryText);
   const vector = toVectorString(queryEmbedding);
 
@@ -65,7 +65,7 @@ export async function searchChunks(
        WHERE user_id = $2 AND chat_id != $3
        ORDER BY distance ASC
        LIMIT $4`,
-      [vector, USER_ID, excludeChatId, limit]
+      [vector, userId, excludeChatId, limit]
     );
   }
 
@@ -75,6 +75,6 @@ export async function searchChunks(
      WHERE user_id = $2
      ORDER BY distance ASC
      LIMIT $3`,
-    [vector, USER_ID, limit]
+    [vector, userId, limit]
   );
 }

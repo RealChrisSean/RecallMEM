@@ -1,8 +1,6 @@
-import { query, queryOne } from "@/lib/db";
+import { query, queryOne, getUserId } from "@/lib/db";
 import { getActiveFacts, FACT_CATEGORIES, type FactCategory } from "@/lib/facts";
 import type { UserProfileRow } from "@/lib/types";
-
-const USER_ID = "local-user";
 
 // Cap each category to prevent unbounded growth
 const CATEGORY_CAPS: Record<FactCategory, number> = {
@@ -60,14 +58,16 @@ export async function buildProfileFromFacts(): Promise<string> {
 
 // Get the cached profile from the database
 export async function getProfile(): Promise<UserProfileRow | null> {
+  const userId = await getUserId();
   return queryOne<UserProfileRow>(
     `SELECT * FROM s2m_user_profiles WHERE user_id = $1`,
-    [USER_ID]
+    [userId]
   );
 }
 
 // Rebuild and save the profile from current active facts
 export async function rebuildProfile(): Promise<string> {
+  const userId = await getUserId();
   const profile = await buildProfileFromFacts();
   await query(
     `INSERT INTO s2m_user_profiles (user_id, profile_summary, updated_at)
@@ -75,7 +75,7 @@ export async function rebuildProfile(): Promise<string> {
      ON CONFLICT (user_id) DO UPDATE
      SET profile_summary = EXCLUDED.profile_summary,
          updated_at = NOW()`,
-    [USER_ID, profile]
+    [userId, profile]
   );
   return profile;
 }

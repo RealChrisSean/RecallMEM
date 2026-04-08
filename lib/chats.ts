@@ -1,7 +1,5 @@
-import { query, queryOne } from "@/lib/db";
+import { query, queryOne, getUserId } from "@/lib/db";
 import type { ChatRow, Message, ModelMode } from "@/lib/types";
-
-const USER_ID = "local-user";
 
 // Format a list of messages into a role-prefixed transcript string
 export function messagesToTranscript(messages: Message[]): string {
@@ -39,11 +37,12 @@ export function transcriptToMessages(transcript: string): Message[] {
 
 // Create a new chat row, return the id
 export async function createChat(mode: ModelMode = "standard"): Promise<string> {
+  const userId = await getUserId();
   const row = await queryOne<{ id: string }>(
     `INSERT INTO s2m_chats (user_id, model_mode, transcript, message_count)
      VALUES ($1, $2, '', 0)
      RETURNING id`,
-    [USER_ID, mode]
+    [userId, mode]
   );
   if (!row) throw new Error("Failed to create chat");
   return row.id;
@@ -54,6 +53,7 @@ export async function updateChat(
   chatId: string,
   messages: Message[]
 ): Promise<void> {
+  const userId = await getUserId();
   const transcript = messagesToTranscript(messages);
   await query(
     `UPDATE s2m_chats
@@ -61,62 +61,68 @@ export async function updateChat(
          message_count = $2,
          updated_at = NOW()
      WHERE id = $3 AND user_id = $4`,
-    [transcript, messages.length, chatId, USER_ID]
+    [transcript, messages.length, chatId, userId]
   );
 }
 
 // Set the chat title (set after auto-generation)
 export async function setChatTitle(chatId: string, title: string): Promise<void> {
+  const userId = await getUserId();
   await query(
     `UPDATE s2m_chats SET title = $1 WHERE id = $2 AND user_id = $3`,
-    [title, chatId, USER_ID]
+    [title, chatId, userId]
   );
 }
 
 // Get a single chat by id
 export async function getChat(chatId: string): Promise<ChatRow | null> {
+  const userId = await getUserId();
   return queryOne<ChatRow>(
     `SELECT * FROM s2m_chats WHERE id = $1 AND user_id = $2`,
-    [chatId, USER_ID]
+    [chatId, userId]
   );
 }
 
 // List all chats for the user, pinned first then newest
 export async function listChats(limit = 100): Promise<ChatRow[]> {
+  const userId = await getUserId();
   return query<ChatRow>(
     `SELECT id, user_id, title, transcript, message_count, model_mode, is_pinned, created_at, updated_at
      FROM s2m_chats
      WHERE user_id = $1
      ORDER BY is_pinned DESC, updated_at DESC
      LIMIT $2`,
-    [USER_ID, limit]
+    [userId, limit]
   );
 }
 
 // Toggle pinned state for a chat
 export async function setPinned(chatId: string, pinned: boolean): Promise<void> {
+  const userId = await getUserId();
   await query(
     `UPDATE s2m_chats SET is_pinned = $1 WHERE id = $2 AND user_id = $3`,
-    [pinned, chatId, USER_ID]
+    [pinned, chatId, userId]
   );
 }
 
 // Delete a chat (cascading: facts, chunks all get removed via FK)
 export async function deleteChat(chatId: string): Promise<void> {
+  const userId = await getUserId();
   await query(
     `DELETE FROM s2m_chats WHERE id = $1 AND user_id = $2`,
-    [chatId, USER_ID]
+    [chatId, userId]
   );
 }
 
 // Get the most recent chat's updated_at timestamp (for "last conversation was X ago")
 export async function getLastChatTime(): Promise<Date | null> {
+  const userId = await getUserId();
   const row = await queryOne<{ updated_at: Date }>(
     `SELECT updated_at FROM s2m_chats
      WHERE user_id = $1
      ORDER BY updated_at DESC
      LIMIT 1`,
-    [USER_ID]
+    [userId]
   );
   return row?.updated_at || null;
 }

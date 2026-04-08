@@ -1,6 +1,4 @@
-import { query, queryOne } from "@/lib/db";
-
-const USER_ID = "local-user";
+import { query, queryOne, getUserId } from "@/lib/db";
 
 export type ProviderType =
   | "ollama"
@@ -29,16 +27,18 @@ export const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
 
 // List all custom providers configured by the user
 export async function listProviders(): Promise<ProviderRow[]> {
+  const userId = await getUserId();
   return query<ProviderRow>(
     `SELECT * FROM s2m_llm_providers WHERE user_id = $1 ORDER BY created_at ASC`,
-    [USER_ID]
+    [userId]
   );
 }
 
 export async function getProvider(id: string): Promise<ProviderRow | null> {
+  const userId = await getUserId();
   return queryOne<ProviderRow>(
     `SELECT * FROM s2m_llm_providers WHERE id = $1 AND user_id = $2`,
-    [id, USER_ID]
+    [id, userId]
   );
 }
 
@@ -49,12 +49,13 @@ export async function createProvider(input: {
   api_key?: string | null;
   model: string;
 }): Promise<string> {
+  const userId = await getUserId();
   const baseUrl = input.base_url || DEFAULT_BASE_URLS[input.type] || null;
   const row = await queryOne<{ id: string }>(
     `INSERT INTO s2m_llm_providers (user_id, label, type, base_url, api_key, model)
      VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id`,
-    [USER_ID, input.label, input.type, baseUrl, input.api_key || null, input.model]
+    [userId, input.label, input.type, baseUrl, input.api_key || null, input.model]
   );
   if (!row) throw new Error("Failed to create provider");
   return row.id;
@@ -94,7 +95,8 @@ export async function updateProvider(
     params.push(input.model);
   }
   if (sets.length === 0) return;
-  params.push(id, USER_ID);
+  const userId = await getUserId();
+  params.push(id, userId);
   await query(
     `UPDATE s2m_llm_providers SET ${sets.join(", ")} WHERE id = $${i++} AND user_id = $${i}`,
     params
@@ -102,8 +104,9 @@ export async function updateProvider(
 }
 
 export async function deleteProvider(id: string): Promise<void> {
+  const userId = await getUserId();
   await query(`DELETE FROM s2m_llm_providers WHERE id = $1 AND user_id = $2`, [
     id,
-    USER_ID,
+    userId,
   ]);
 }

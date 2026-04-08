@@ -58,20 +58,21 @@ const COMMANDS = {
 };
 
 /**
- * Resolve the install path. If first-run, clone the repo to ~/.recallmem first.
- * Returns the install path or null on failure.
+ * Resolve the install path AND tell the caller whether we're in dev mode.
+ * Dev mode = the user is running from inside a recallmem git checkout.
+ * In dev mode we skip the production build so they get hot reload via next dev.
  */
-async function resolveInstallPath() {
+async function resolveInstall() {
   const mode = detectInstallMode();
 
   if (mode.mode === "dev") {
     info(`Using local checkout: ${mode.path}`);
-    return mode.path;
+    return { path: mode.path, devMode: true };
   }
 
   if (mode.mode === "user") {
     info(`Using install at: ${mode.path}`);
-    return mode.path;
+    return { path: mode.path, devMode: false };
   }
 
   // First run - clone the repo
@@ -95,30 +96,37 @@ async function resolveInstallPath() {
   }
 
   success(`Installed RecallMEM to ${mode.path}`);
-  return mode.path;
+  return { path: mode.path, devMode: false };
 }
 
 async function initCommand() {
   printHeader();
-  const installPath = await resolveInstallPath();
-  if (!installPath) process.exit(1);
-  const result = await setupCommand({ installPath });
+  const install = await resolveInstall();
+  if (!install) process.exit(1);
+  const result = await setupCommand({
+    installPath: install.path,
+    devMode: install.devMode,
+  });
   if (!result.ok) process.exit(1);
 }
 
 async function startWrapper() {
-  const installPath = await resolveInstallPath();
-  if (!installPath) process.exit(1);
-  await startCommand({ installPath });
+  const install = await resolveInstall();
+  if (!install) process.exit(1);
+  await startCommand({ installPath: install.path });
 }
 
 async function defaultCommand() {
   printHeader();
-  const installPath = await resolveInstallPath();
-  if (!installPath) process.exit(1);
-  const setupResult = await setupCommand({ installPath, skipIfDone: true });
+  const install = await resolveInstall();
+  if (!install) process.exit(1);
+  const setupResult = await setupCommand({
+    installPath: install.path,
+    devMode: install.devMode,
+    skipIfDone: true,
+  });
   if (!setupResult.ok) process.exit(1);
-  await startCommand({ installPath });
+  await startCommand({ installPath: install.path });
 }
 
 async function main() {

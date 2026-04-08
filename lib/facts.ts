@@ -1,8 +1,6 @@
-import { query, queryOne } from "@/lib/db";
+import { query, queryOne, getUserId } from "@/lib/db";
 import { chat as llmChat, FAST_MODEL } from "@/lib/llm";
 import type { UserFactRow } from "@/lib/types";
-
-const USER_ID = "local-user";
 
 export const FACT_CATEGORIES = [
   "identity",
@@ -165,11 +163,12 @@ export async function storeFacts(
   sourceChatId: string
 ): Promise<number> {
   if (facts.length === 0) return 0;
+  const userId = await getUserId();
 
   // Get existing active facts to dedupe against
   const existing = await query<{ fact_text: string }>(
     `SELECT fact_text FROM s2m_user_facts WHERE user_id = $1 AND is_active = TRUE`,
-    [USER_ID]
+    [userId]
   );
   const existingSet = new Set(existing.map((r) => r.fact_text.toLowerCase().trim()));
 
@@ -181,7 +180,7 @@ export async function storeFacts(
     await query(
       `INSERT INTO s2m_user_facts (user_id, fact_text, category, source_chat_id, is_active)
        VALUES ($1, $2, $3, $4, TRUE)`,
-      [USER_ID, fact, category, sourceChatId]
+      [userId, fact, category, sourceChatId]
     );
     existingSet.add(normalized);
     inserted++;
@@ -191,28 +190,31 @@ export async function storeFacts(
 
 // Get all active facts for the user
 export async function getActiveFacts(limit = 200): Promise<UserFactRow[]> {
+  const userId = await getUserId();
   return query<UserFactRow>(
     `SELECT * FROM s2m_user_facts
      WHERE user_id = $1 AND is_active = TRUE
      ORDER BY created_at DESC
      LIMIT $2`,
-    [USER_ID, limit]
+    [userId, limit]
   );
 }
 
 // Delete a single fact (mark inactive)
 export async function deleteFact(factId: string): Promise<void> {
+  const userId = await getUserId();
   await query(
     `UPDATE s2m_user_facts SET is_active = FALSE WHERE id = $1 AND user_id = $2`,
-    [factId, USER_ID]
+    [factId, userId]
   );
 }
 
 // Hard delete a fact (removes from DB completely)
 export async function hardDeleteFact(factId: string): Promise<void> {
+  const userId = await getUserId();
   await query(
     `DELETE FROM s2m_user_facts WHERE id = $1 AND user_id = $2`,
-    [factId, USER_ID]
+    [factId, userId]
   );
 }
 
@@ -225,20 +227,21 @@ export async function wipeAllMemory(): Promise<{
   chunksDeleted: number;
   profileCleared: boolean;
 }> {
+  const userId = await getUserId();
   // Count first so we can report accurate numbers
   const beforeFacts = await queryOne<{ count: string }>(
     `SELECT COUNT(*)::text as count FROM s2m_user_facts WHERE user_id = $1`,
-    [USER_ID]
+    [userId]
   );
   const beforeChunks = await queryOne<{ count: string }>(
     `SELECT COUNT(*)::text as count FROM s2m_transcript_chunks WHERE user_id = $1`,
-    [USER_ID]
+    [userId]
   );
 
   // Step 1: logical delete
-  await query(`DELETE FROM s2m_user_facts WHERE user_id = $1`, [USER_ID]);
-  await query(`DELETE FROM s2m_transcript_chunks WHERE user_id = $1`, [USER_ID]);
-  await query(`DELETE FROM s2m_user_profiles WHERE user_id = $1`, [USER_ID]);
+  await query(`DELETE FROM s2m_user_facts WHERE user_id = $1`, [userId]);
+  await query(`DELETE FROM s2m_transcript_chunks WHERE user_id = $1`, [userId]);
+  await query(`DELETE FROM s2m_user_profiles WHERE user_id = $1`, [userId]);
 
   // Step 2: physically reclaim space (rewrites tables, releases dead tuples)
   // VACUUM FULL takes an exclusive lock — fine for a personal single-user setup.
@@ -272,25 +275,26 @@ export async function nukeEverything(): Promise<{
   factsDeleted: number;
   chunksDeleted: number;
 }> {
+  const userId = await getUserId();
   const beforeChats = await queryOne<{ count: string }>(
     `SELECT COUNT(*)::text as count FROM s2m_chats WHERE user_id = $1`,
-    [USER_ID]
+    [userId]
   );
   const beforeFacts = await queryOne<{ count: string }>(
     `SELECT COUNT(*)::text as count FROM s2m_user_facts WHERE user_id = $1`,
-    [USER_ID]
+    [userId]
   );
   const beforeChunks = await queryOne<{ count: string }>(
     `SELECT COUNT(*)::text as count FROM s2m_transcript_chunks WHERE user_id = $1`,
-    [USER_ID]
+    [userId]
   );
 
   // Deleting chats cascades to facts and chunks via FK ON DELETE CASCADE,
   // but we delete explicitly to be safe.
-  await query(`DELETE FROM s2m_user_facts WHERE user_id = $1`, [USER_ID]);
-  await query(`DELETE FROM s2m_transcript_chunks WHERE user_id = $1`, [USER_ID]);
-  await query(`DELETE FROM s2m_user_profiles WHERE user_id = $1`, [USER_ID]);
-  await query(`DELETE FROM s2m_chats WHERE user_id = $1`, [USER_ID]);
+  await query(`DELETE FROM s2m_user_facts WHERE user_id = $1`, [userId]);
+  await query(`DELETE FROM s2m_transcript_chunks WHERE user_id = $1`, [userId]);
+  await query(`DELETE FROM s2m_user_profiles WHERE user_id = $1`, [userId]);
+  await query(`DELETE FROM s2m_chats WHERE user_id = $1`, [userId]);
 
   try {
     await query(`VACUUM FULL s2m_chats`);
@@ -319,11 +323,12 @@ export async function updateFact(
   newText: string,
   newCategory?: FactCategory
 ): Promise<void> {
+  const userId = await getUserId();
   const category = newCategory || categorize(newText);
   await query(
     `UPDATE s2m_user_facts
      SET fact_text = $1, category = $2
      WHERE id = $3 AND user_id = $4`,
-    [newText, category, factId, USER_ID]
+    [newText, category, factId, userId]
   );
 }
