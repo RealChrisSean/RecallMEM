@@ -7,8 +7,8 @@
 
 <p align="center">
   <strong>Persistent personal AI.</strong> Powered by Gemma 4 running locally on your own machine.
-  <br>
-  Not a chatbot (chatbots forget you). Not an agent (agents don't remember you). A private AI you have an ongoing relationship with, built on a deterministic memory framework where the LLM never touches your data.
+  <br> <br>
+  This is not a chatbot (chatbots forget you) & this is not an agent (agents don't remember you). <br> <br> This IS a private AI you have an ongoing relationship with, built on a deterministic memory framework where the LLM never touches your data.
 </p>
 
 <p align="center">
