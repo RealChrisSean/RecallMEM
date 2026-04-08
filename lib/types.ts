@@ -1,4 +1,4 @@
-// Core types for Speak2Me Personal
+// Core types for RecallMEM
 
 export type ModelMode = "standard" | "unrestricted";
 

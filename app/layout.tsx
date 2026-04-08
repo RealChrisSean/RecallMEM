@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Speak2Me Personal",
-  description: "Local-only AI chatbot with persistent memory",
+  title: "RecallMEM",
+  description: "Private, local-first AI chatbot with persistent working memory",
 };
 
 export default function RootLayout({

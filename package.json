@@ -19,7 +19,11 @@
     "start": "next start",
     "lint": "eslint",
     "migrate": "tsx scripts/migrate.ts",
-    "cli": "node ./bin/recallmem.js"
+    "cli": "node ./bin/recallmem.js",
+    "publish:sync": "node scripts/sync-publish.js",
+    "publish:pack": "npm run publish:sync && cd publish && npm pack",
+    "publish:dry": "npm run publish:sync && cd publish && npm publish --dry-run",
+    "publish:npm": "npm run publish:sync && cd publish && npm publish --access public"
   },
   "dependencies": {
     "@langchain/core": "^1.1.39",

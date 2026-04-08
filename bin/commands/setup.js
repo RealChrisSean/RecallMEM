@@ -48,8 +48,6 @@ const {
 
 const { confirm } = require("../lib/prompt");
 
-const PROJECT_ROOT = process.cwd();
-const ENV_PATH = path.join(PROJECT_ROOT, ".env.local");
 const DEFAULT_DB_NAME = "recallmem";
 
 function defaultConnectionString() {
@@ -57,9 +55,9 @@ function defaultConnectionString() {
   return `postgres://${user}@localhost:5432/${DEFAULT_DB_NAME}`;
 }
 
-function readEnv() {
-  if (!fs.existsSync(ENV_PATH)) return {};
-  const text = fs.readFileSync(ENV_PATH, "utf-8");
+function readEnv(envPath) {
+  if (!fs.existsSync(envPath)) return {};
+  const text = fs.readFileSync(envPath, "utf-8");
   const env = {};
   for (const line of text.split("\n")) {
     const m = line.match(/^([A-Z_]+)=(.*)$/);
@@ -68,13 +66,18 @@ function readEnv() {
   return env;
 }
 
-function writeEnv(env) {
+function writeEnv(envPath, env) {
   const lines = Object.entries(env).map(([k, v]) => `${k}=${v}`);
-  fs.writeFileSync(ENV_PATH, lines.join("\n") + "\n");
+  fs.writeFileSync(envPath, lines.join("\n") + "\n");
 }
 
 async function setupCommand(opts = {}) {
-  const { silent = false, skipIfDone = false } = opts;
+  const {
+    silent = false,
+    skipIfDone = false,
+    installPath = process.cwd(),
+  } = opts;
+  const ENV_PATH = path.join(installPath, ".env.local");
 
   // ─── Step 1: Node.js ───────────────────────────────────────────────────
   if (!silent) section("Checking dependencies");
@@ -119,7 +122,7 @@ async function setupCommand(opts = {}) {
   success("Postgres service running on localhost:5432");
 
   // ─── Step 4: env file (we need DATABASE_URL before checking pgvector) ──
-  const env = readEnv();
+  const env = readEnv(ENV_PATH);
   let connectionString = env.DATABASE_URL;
 
   if (!connectionString) {
@@ -164,7 +167,7 @@ async function setupCommand(opts = {}) {
   try {
     process.env.DATABASE_URL = connectionString;
     const migrateResult = spawnSync("npx", ["tsx", "scripts/migrate.ts"], {
-      cwd: PROJECT_ROOT,
+      cwd: installPath,
       stdio: silent ? "pipe" : "inherit",
       env: { ...process.env, DATABASE_URL: connectionString },
     });
@@ -247,8 +250,9 @@ async function setupCommand(opts = {}) {
     OLLAMA_FAST_MODEL: env.OLLAMA_FAST_MODEL || "gemma4:e4b",
     OLLAMA_EMBED_MODEL: env.OLLAMA_EMBED_MODEL || "embeddinggemma",
   };
-  writeEnv(finalEnv);
-  success(`.env.local ${fs.existsSync(ENV_PATH) ? "updated" : "created"}`);
+  const existedBefore = fs.existsSync(ENV_PATH);
+  writeEnv(ENV_PATH, finalEnv);
+  success(`.env.local ${existedBefore ? "updated" : "created"}`);
 
   blank();
   success(color.bold("Setup complete!"));

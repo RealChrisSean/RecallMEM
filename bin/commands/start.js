@@ -12,8 +12,6 @@ const fs = require("node:fs");
 const { spawn } = require("node:child_process");
 const { color, section, success, info } = require("../lib/output");
 
-const PROJECT_ROOT = process.cwd();
-
 function openBrowser(url) {
   const platform = process.platform;
   const cmd =
@@ -27,10 +25,11 @@ function openBrowser(url) {
   }
 }
 
-async function startCommand() {
+async function startCommand(opts = {}) {
+  const { installPath = process.cwd() } = opts;
   section("Starting RecallMEM");
 
-  const hasBuild = fs.existsSync(path.join(PROJECT_ROOT, ".next", "BUILD_ID"));
+  const hasBuild = fs.existsSync(path.join(installPath, ".next", "BUILD_ID"));
   const command = hasBuild ? "start" : "dev";
 
   info(hasBuild ? "Production build detected, running next start" : "No build found, running next dev");
@@ -43,7 +42,7 @@ async function startCommand() {
   setTimeout(() => openBrowser("http://localhost:3000"), 2000);
 
   const child = spawn("npx", ["next", command], {
-    cwd: PROJECT_ROOT,
+    cwd: installPath,
     stdio: "inherit",
     env: process.env,
   });

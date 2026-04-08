@@ -6,9 +6,11 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ModelMode, Message, AttachedFile } from "@/lib/types";
 import { MODEL_OPTIONS, type ModelId } from "@/lib/llm-config";
+import { AppFooter } from "@/components/AppFooter";
+import { Logo } from "@/components/Logo";
 
-const MODEL_STORAGE_KEY = "speak2me_selected_model";
-const SIDEBAR_STORAGE_KEY = "speak2me_sidebar_open";
+const MODEL_STORAGE_KEY = "recallmem_selected_model";
+const SIDEBAR_STORAGE_KEY = "recallmem_sidebar_open";
 const DEFAULT_MODEL: ModelId = "gemma4:26b";
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
@@ -586,8 +588,19 @@ export default function ChatPage() {
               <SidebarIcon />
             </button>
           )}
-          <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Speak2Me</h1>
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">Personal · Local</span>
+          {/* Only show the logo + name in the chat header when the sidebar is
+              closed. When it's open, the sidebar already shows them. */}
+          {!sidebarOpen && (
+            <>
+              <Logo size={20} className="text-zinc-900 dark:text-zinc-100" />
+              <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                RecallMEM
+              </h1>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                Local · Private
+              </span>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {isFinalizing && (
@@ -615,9 +628,9 @@ export default function ChatPage() {
           </Link>
           <Link
             href="/rules"
-            className="px-3 py-1.5 text-sm font-medium rounded-md border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-700 dark:text-zinc-300"
+            className="px-3 py-1.5 text-sm font-mono font-medium rounded-md border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-700 dark:text-zinc-300"
           >
-            Rules
+            rules.md
           </Link>
           <Link
             href="/memory"
@@ -691,7 +704,7 @@ export default function ChatPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Message Speak2Me..."
+              placeholder="Message RecallMEM..."
               rows={1}
               disabled={isStreaming}
               className="w-full resize-none rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pl-12 pr-12 py-3 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700 disabled:opacity-50"
@@ -759,9 +772,12 @@ function Sidebar({
     <aside className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-col">
       {/* Header */}
       <div className="px-3 py-3 flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 px-2">
-          Speak2Me
-        </h2>
+        <div className="flex items-center gap-2 px-2">
+          <Logo size={16} className="text-zinc-900 dark:text-zinc-100" />
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            RecallMEM
+          </h2>
+        </div>
         <button
           onClick={onClose}
           className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-colors"
@@ -835,6 +851,9 @@ function Sidebar({
           </>
         )}
       </div>
+
+      {/* Footer with copyright and social links */}
+      <AppFooter />
     </aside>
   );
 }

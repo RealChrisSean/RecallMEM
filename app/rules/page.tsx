@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { AppFooter } from "@/components/AppFooter";
+import { Logo } from "@/components/Logo";
 
 const PLACEHOLDER = `Examples of rules you might set:
 
@@ -85,9 +87,12 @@ export default function RulesPage() {
             >
               ← Back to chat
             </Link>
-            <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 ml-3">
-              Rules
-            </h1>
+            <div className="flex items-center gap-2 ml-3">
+              <Logo size={18} className="text-zinc-900 dark:text-zinc-100" />
+              <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 font-mono">
+                rules.md
+              </h1>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             {savedAt && !dirty && (
@@ -109,12 +114,15 @@ export default function RulesPage() {
       <div className="max-w-3xl mx-auto px-6 py-8 space-y-4">
         <div>
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-1">
-            How the AI should behave with you
+            Standing instructions for how the AI should behave with you
           </h2>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-            These rules get injected into every conversation as part of the system
-            prompt. They override the default AI behavior. Think of it like a
-            standing memo to the AI about how you want to be treated.
+            Like <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">CLAUDE.md</code> or{" "}
+            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">AGENTS.md</code>{" "}
+            for coding agents, but for your personal AI. Whatever you write here gets
+            injected into every conversation as part of the system prompt. The AI is
+            instructed to follow these rules and they take priority over its default
+            behavior.
           </p>
         </div>
 
@@ -147,10 +155,12 @@ export default function RulesPage() {
           <ul className="space-y-1 list-disc list-inside">
             <li>Be specific. "Don't be preachy" is vague. "Don't tell me to consult a professional unless I ask" is actionable.</li>
             <li>Rules apply to every conversation immediately after saving.</li>
-            <li>You don't need to repeat instructions in each chat -- this is the AI's permanent context for how to behave with you.</li>
+            <li>You don't need to repeat instructions in each chat. This is the AI's permanent context for how to behave with you.</li>
             <li>4000 character limit. If you need more, prioritize the most important rules.</li>
           </ul>
         </div>
+
+        <AppFooter variant="page" />
       </div>
     </div>
   );

@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { AppFooter } from "@/components/AppFooter";
+import { Logo } from "@/components/Logo";
 
 type ProviderType = "ollama" | "anthropic" | "openai" | "openai-compatible";
 
@@ -264,9 +266,12 @@ export default function ProvidersPage() {
             >
               ← Back to chat
             </Link>
-            <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 ml-3">
-              Models &amp; Providers
-            </h1>
+            <div className="flex items-center gap-2 ml-3">
+              <Logo size={18} className="text-zinc-900 dark:text-zinc-100" />
+              <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                Models &amp; Providers
+              </h1>
+            </div>
           </div>
           <button
             onClick={() => {
@@ -525,6 +530,8 @@ export default function ProvidersPage() {
             Use Ollama for anything you want to keep fully private.
           </p>
         </div>
+
+        <AppFooter variant="page" />
       </div>
     </div>
   );

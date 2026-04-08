@@ -60,3 +60,10 @@ CLAUDE.md
 AGENTS.md
 .cursor/
 .aider*
+
+# Synced npm publish artifacts (regenerated from bin/ via scripts/sync-publish.js)
+publish/bin/
+publish/LICENSE
+publish/NOTICE
+publish/README.md
+publish/*.tgz

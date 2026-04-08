@@ -1,34 +1,50 @@
 /**
  * recallmem upgrade
  *
- * Runs pending migrations. Useful after pulling new code that includes
- * new migration files. Doesn't restart the server -- assumes you're not
+ * Pulls the latest code (git pull), reinstalls dependencies, and runs any
+ * pending migrations. Doesn't restart the server -- assumes you're not
  * running it, or you'll restart manually.
  */
 
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { gitPull, detectInstallMode } = require("../lib/install-mode");
 const { color, section, success, fail, info, blank } = require("../lib/output");
 
-const PROJECT_ROOT = process.cwd();
-
 async function upgradeCommand() {
-  section("Running migrations");
+  const mode = detectInstallMode();
 
-  const result = spawnSync("npx", ["tsx", "scripts/migrate.ts"], {
-    cwd: PROJECT_ROOT,
+  if (mode.mode === "first-run") {
+    fail("Nothing to upgrade -- no install found.");
+    info("Run `npx recallmem` first to install.");
+    return;
+  }
+
+  section(`Upgrading ${mode.path}`);
+
+  // Pull latest code
+  const pullResult = gitPull(mode.path);
+  if (!pullResult.ok) {
+    fail(`git pull failed: ${pullResult.error}`);
+    process.exit(1);
+  }
+
+  // Run pending migrations
+  section("Running migrations");
+  const migrateResult = spawnSync("npx", ["tsx", "scripts/migrate.ts"], {
+    cwd: mode.path,
     stdio: "inherit",
     env: process.env,
   });
 
-  if (result.status !== 0) {
-    fail("Upgrade failed");
+  if (migrateResult.status !== 0) {
+    fail("Migration failed");
     process.exit(1);
   }
 
   blank();
   success("Up to date");
-  info("Restart the server to pick up any code changes: npx recallmem start");
+  info("Restart with: npx recallmem");
   blank();
 }
 

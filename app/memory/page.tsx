@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { AppFooter } from "@/components/AppFooter";
+import { Logo } from "@/components/Logo";
 
 const FACT_CATEGORIES = [
   "identity",
@@ -210,9 +212,12 @@ export default function MemoryPage() {
             >
               ← Back to chat
             </Link>
-            <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 ml-3">
-              Memory
-            </h1>
+            <div className="flex items-center gap-2 ml-3">
+              <Logo size={18} className="text-zinc-900 dark:text-zinc-100" />
+              <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                Memory
+              </h1>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <span className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -361,6 +366,8 @@ export default function MemoryPage() {
             </div>
           )}
         </section>
+
+        <AppFooter variant="page" />
       </div>
     </div>
   );

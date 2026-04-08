@@ -98,19 +98,25 @@ function detectPostgresService() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// pgvector extension (requires a connection to check)
+// pgvector extension (uses psql via shell to avoid pg dependency in the CLI)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function detectPgvector(connectionString) {
+function detectPgvector(connectionString) {
   try {
-    const { Client } = require("pg");
-    const client = new Client({ connectionString });
-    await client.connect();
-    const res = await client.query(
-      `SELECT 1 FROM pg_available_extensions WHERE name = 'vector'`
+    const result = spawnSync(
+      "psql",
+      [
+        connectionString,
+        "-tAc",
+        "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'",
+      ],
+      { stdio: "pipe", encoding: "utf-8" }
     );
-    await client.end();
-    return { ok: res.rows.length > 0, available: res.rows.length > 0 };
+    if (result.status !== 0) {
+      return { ok: false, available: false, error: result.stderr?.trim() };
+    }
+    const available = result.stdout.trim() === "1";
+    return { ok: available, available };
   } catch (err) {
     return { ok: false, available: false, error: err.message };
   }
@@ -178,15 +184,18 @@ async function detectOllamaModel(modelName) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Database existence
+// Database existence (uses psql via shell to avoid pg dependency in the CLI)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function detectDatabase(connectionString) {
+function detectDatabase(connectionString) {
   try {
-    const { Client } = require("pg");
-    const client = new Client({ connectionString });
-    await client.connect();
-    await client.end();
+    const result = spawnSync("psql", [connectionString, "-tAc", "SELECT 1"], {
+      stdio: "pipe",
+      encoding: "utf-8",
+    });
+    if (result.status !== 0) {
+      return { ok: false, exists: false, error: result.stderr?.trim() };
+    }
     return { ok: true, exists: true };
   } catch (err) {
     return { ok: false, exists: false, error: err.message };
