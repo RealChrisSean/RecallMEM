@@ -5,7 +5,7 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ModelMode, Message, AttachedFile } from "@/lib/types";
-import { MODEL_OPTIONS, type ModelId } from "@/lib/llm";
+import { MODEL_OPTIONS, type ModelId } from "@/lib/llm-config";
 
 const MODEL_STORAGE_KEY = "speak2me_selected_model";
 const SIDEBAR_STORAGE_KEY = "speak2me_sidebar_open";

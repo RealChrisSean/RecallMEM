@@ -1,20 +1,24 @@
-// LLM chat completion router. Supports:
+// LLM chat completion router (server-only). Supports:
 //   - Ollama (local, no auth) - default
 //   - Anthropic (Claude) via /v1/messages
 //   - OpenAI / OpenAI-compatible via /v1/chat/completions
-// Provider config is per-request via the `provider` field, falling back to
-// the local Ollama defaults if no provider is specified.
+//
+// IMPORTANT: This file is server-only because it imports from `lib/providers`
+// which uses `pg`. Client-safe constants (MODEL_OPTIONS, ModelId, ModelMode)
+// live in `lib/llm-config.ts` and should be imported from React components.
 
+import "server-only";
 import { getProvider, type ProviderType, type ProviderRow } from "@/lib/providers";
+import {
+  type ModelMode,
+  type ModelConfig,
+  MODEL_OPTIONS,
+  type ModelId,
+} from "@/lib/llm-config";
 
-export type ModelMode = "standard" | "unrestricted";
-
-export interface ModelConfig {
-  baseURL: string;
-  defaultModel: string;
-  label: string;
-  description: string;
-}
+// Re-export client-safe types and constants for convenience on the server side
+export { MODEL_OPTIONS };
+export type { ModelMode, ModelConfig, ModelId };
 
 export const MODEL_CONFIGS: Record<ModelMode, ModelConfig> = {
   standard: {
@@ -30,37 +34,6 @@ export const MODEL_CONFIGS: Record<ModelMode, ModelConfig> = {
     description: "Gemma 4 31B (abliterated) - no refusals",
   },
 };
-
-// User-selectable model variants for the UI picker
-// Only "standard" mode supports model switching for now
-export const MODEL_OPTIONS = [
-  {
-    id: "gemma4:31b",
-    label: "Gemma 4 31B",
-    description: "Best quality, slowest. ~17 tok/s",
-    sizeGB: 19,
-  },
-  {
-    id: "gemma4:26b",
-    label: "Gemma 4 26B MoE",
-    description: "Recommended. Fast and smart. ~50-80 tok/s",
-    sizeGB: 18,
-  },
-  {
-    id: "gemma4:e4b",
-    label: "Gemma 4 E4B",
-    description: "Lighter. Good for laptops. Very fast.",
-    sizeGB: 4,
-  },
-  {
-    id: "gemma4:e2b",
-    label: "Gemma 4 E2B",
-    description: "Smallest. Phones / 8GB devices.",
-    sizeGB: 2,
-  },
-] as const;
-
-export type ModelId = (typeof MODEL_OPTIONS)[number]["id"];
 
 // The fast model used for background pipeline tasks (title gen, fact extraction)
 export const FAST_MODEL =

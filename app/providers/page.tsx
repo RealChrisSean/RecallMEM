@@ -37,6 +37,36 @@ const PRESET_HINTS: Record<ProviderType, string> = {
     "e.g. llama-3.3-70b-versatile, mixtral-8x22b, anthropic/claude-opus-4-6",
 };
 
+// Curated list of known models per provider type. The user picks the friendly
+// name from the dropdown and the API model ID gets filled in automatically.
+// Update this when new models are released.
+interface KnownModel {
+  label: string;
+  apiId: string;
+}
+
+const KNOWN_MODELS: Partial<Record<ProviderType, KnownModel[]>> = {
+  anthropic: [
+    { label: "Claude Opus 4.6", apiId: "claude-opus-4-6" },
+    { label: "Claude Sonnet 4.6", apiId: "claude-sonnet-4-6" },
+    { label: "Claude Haiku 4.5", apiId: "claude-haiku-4-5-20251001" },
+    { label: "Claude Opus 4.5", apiId: "claude-opus-4-5" },
+    { label: "Claude Sonnet 4.5", apiId: "claude-sonnet-4-5" },
+    { label: "Claude Haiku 4", apiId: "claude-haiku-4-20250514" },
+  ],
+  openai: [
+    { label: "GPT-5", apiId: "gpt-5" },
+    { label: "GPT-5 Mini", apiId: "gpt-5-mini" },
+    { label: "GPT-5 Nano", apiId: "gpt-5-nano" },
+    { label: "GPT-4.1", apiId: "gpt-4.1" },
+    { label: "GPT-4o", apiId: "gpt-4o" },
+    { label: "GPT-4o Mini", apiId: "gpt-4o-mini" },
+    { label: "o4-mini (reasoning)", apiId: "o4-mini" },
+    { label: "o3 (reasoning)", apiId: "o3" },
+    { label: "o1 (reasoning)", apiId: "o1" },
+  ],
+};
+
 const KEY_HELP: Record<ProviderType, { url: string; text: string } | null> = {
   ollama: null,
   anthropic: {
@@ -102,6 +132,26 @@ export default function ProvidersPage() {
   function handleTypeChange(newType: ProviderType) {
     setType(newType);
     setBaseUrl(DEFAULT_BASE_URLS[newType]);
+    setTestResult(null);
+    // Clear model + label so the user picks fresh from the new provider's options
+    setModel("");
+    setLabel("");
+  }
+
+  // When the user picks a known model from the dropdown, auto-set the label
+  // to the model's friendly name
+  function handleKnownModelPick(apiId: string) {
+    setModel(apiId);
+    setTestResult(null);
+    const known = KNOWN_MODELS[type]?.find((m) => m.apiId === apiId);
+    if (known) setLabel(known.label);
+  }
+
+  // When the user types a free-text model (openai-compatible / ollama),
+  // mirror it as the label
+  function handleModelTextChange(value: string) {
+    setModel(value);
+    setLabel(value);
     setTestResult(null);
   }
 
@@ -306,19 +356,6 @@ export default function ProvidersPage() {
 
             <div>
               <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                Label
-              </label>
-              <input
-                type="text"
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-                placeholder="e.g. Claude Opus 4.6"
-                className="w-full text-sm px-3 py-2 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-600"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                 Provider type
               </label>
               <select
@@ -339,13 +376,36 @@ export default function ProvidersPage() {
               <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                 Model
               </label>
-              <input
-                type="text"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder={PRESET_HINTS[type]}
-                className="w-full text-sm font-mono px-3 py-2 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-600"
-              />
+              {KNOWN_MODELS[type] ? (
+                <>
+                  <select
+                    value={model}
+                    onChange={(e) => handleKnownModelPick(e.target.value)}
+                    className="w-full text-sm px-3 py-2 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-600"
+                  >
+                    <option value="">— Pick a model —</option>
+                    {KNOWN_MODELS[type]?.map((m) => (
+                      <option key={m.apiId} value={m.apiId}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                  {model && (
+                    <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-1">
+                      API model ID:{" "}
+                      <code className="font-mono">{model}</code>
+                    </p>
+                  )}
+                </>
+              ) : (
+                <input
+                  type="text"
+                  value={model}
+                  onChange={(e) => handleModelTextChange(e.target.value)}
+                  placeholder={PRESET_HINTS[type]}
+                  className="w-full text-sm font-mono px-3 py-2 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-600"
+                />
+              )}
             </div>
 
             {(type === "openai-compatible" || type === "ollama") && (
