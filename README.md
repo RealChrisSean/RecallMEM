@@ -21,7 +21,7 @@ That's the install. One command. The CLI handles the rest. It clones the repo, s
 
 ## Why I built this
 
-I wanted my own private AI for the kind of conversations I don't want sitting on someone else's server. Legal stuff. Medical stuff. Personal stuff. The stuff you'd actually want a real friend to help you think through.
+I wanted my own private AI for the kind of conversations I don't want sitting on someone else's server. Personal stuff. The stuff you'd actually want a real friend to help you think through.
 
 Here's the problem with every "private AI" tool I tried: they all fall into one of three buckets.
 
@@ -153,7 +153,7 @@ Each layer does a different job:
 
 - **Profile** loads instantly. It's the "who am I talking to" baseline. One database row, always loaded into every system prompt.
 - **Facts** are atomic statements you can view, edit, and delete. Stored as individual rows. Pinned into the prompt every conversation.
-- **Vector search** finds semantically relevant prose from any past conversation. Catches the stuff that doesn't fit cleanly into facts, like that legal argument you were working through three weeks ago.
+- **Vector search** finds semantically relevant prose from any past conversation. Catches the stuff that doesn't fit cleanly into facts, like that idea you were working through three weeks ago.
 
 Together, they let the AI know your name, your family, your job, AND remember the specific thing you mentioned a month ago when it becomes relevant.
 

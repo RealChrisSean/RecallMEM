@@ -90,7 +90,7 @@ export default function RulesPage() {
             <div className="flex items-center gap-2 ml-3">
               <Logo size={18} className="text-zinc-900 dark:text-zinc-100" />
               <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 font-mono">
-                rules.md
+                RULES.md
               </h1>
             </div>
           </div>

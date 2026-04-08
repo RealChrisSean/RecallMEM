@@ -630,7 +630,7 @@ export default function ChatPage() {
             href="/rules"
             className="px-3 py-1.5 text-sm font-mono font-medium rounded-md border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-700 dark:text-zinc-300"
           >
-            rules.md
+            RULES.md
           </Link>
           <Link
             href="/memory"
