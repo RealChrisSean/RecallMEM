@@ -117,10 +117,10 @@ sequenceDiagram
     UI->>UI: Show "Saving memory..."
     UI->>API: POST chatId
     API->>LLM: Generate title (Gemma E4B)
-    LLM-->>API: "Reviewing FMLA timeline"
+    LLM-->>API: "Discussing project ideas"
     API->>DB: Save title
     API->>LLM: Extract facts (Gemma E4B)
-    LLM-->>API: ["User is filing FMLA case", ...]
+    LLM-->>API: ["User's name is...", "User works at...", ...]
     API->>DB: Insert new facts (deduped)
     API->>DB: Rebuild profile from all facts
     API->>API: Embed transcript chunks

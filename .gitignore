@@ -40,7 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Speak2Me Personal additions
+# RecallMEM additions
 _reference/
 *.db
 *.sqlite
@@ -51,3 +51,8 @@ backup.sql
 **/exports/
 **/personal-data/
 .claude/
+
+# Personal notes - never commit
+DEVLOG.md
+NOTES.md
+PERSONAL.md
