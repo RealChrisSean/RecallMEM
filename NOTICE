@@ -1,0 +1,28 @@
+RecallMEM
+Copyright 2026 Chris Sean
+
+This product includes software developed by Chris Sean.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Third-party components used by this software (each under their own license):
+
+  - Next.js (MIT) - https://nextjs.org
+  - React (MIT) - https://react.dev
+  - Tailwind CSS (MIT) - https://tailwindcss.com
+  - PostgreSQL (PostgreSQL License) - https://www.postgresql.org
+  - pgvector (PostgreSQL License) - https://github.com/pgvector/pgvector
+  - node-postgres / pg (MIT) - https://node-postgres.com
+  - Ollama (MIT) - https://ollama.com
+  - Gemma 4 (Apache 2.0) - Google DeepMind, https://ai.google.dev/gemma
+  - EmbeddingGemma (Apache 2.0) - Google DeepMind
+  - react-markdown (MIT) - https://github.com/remarkjs/react-markdown
+  - remark-gfm (MIT) - https://github.com/remarkjs/remark-gfm
+  - pdf-parse (MIT) - https://gitlab.com/autokent/pdf-parse
+  - pdfjs-dist (Apache 2.0) - Mozilla, https://mozilla.github.io/pdf.js/
+  - Lucide icons (ISC) - https://lucide.dev
+  - shadcn/ui patterns (MIT) - https://ui.shadcn.com

@@ -407,7 +407,9 @@ For the original planning docs (back when this was conceived as a multi-user OSS
 
 ## License
 
-MIT. Do whatever you want with it.
+Apache License 2.0. See [LICENSE](./LICENSE) for the full text and [NOTICE](./NOTICE) for third-party attributions.
+
+You can use, modify, fork, and redistribute RecallMEM for any purpose -- personal or commercial. The license includes an explicit patent grant and the standard "no warranty, no liability" disclaimer.
 
 ---
 

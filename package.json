@@ -1,6 +1,14 @@
 {
   "name": "recallmem",
   "version": "0.1.0",
+  "description": "Private, local-first AI chatbot with persistent working memory",
+  "license": "Apache-2.0",
+  "author": "Chris Sean",
+  "homepage": "https://github.com/RealChrisSean/RecallMEM",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RealChrisSean/RecallMEM.git"
+  },
   "private": true,
   "scripts": {
     "dev": "next dev",
