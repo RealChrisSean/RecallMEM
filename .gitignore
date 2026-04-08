@@ -52,7 +52,11 @@ backup.sql
 **/personal-data/
 .claude/
 
-# Personal notes - never commit
+# Personal notes / agent context - never commit
 DEVLOG.md
 NOTES.md
 PERSONAL.md
+CLAUDE.md
+AGENTS.md
+.cursor/
+.aider*
