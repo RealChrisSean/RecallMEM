@@ -61,3 +61,19 @@ CREATE INDEX IF NOT EXISTS idx_s2m_chunks_user ON s2m_transcript_chunks (user_id
 CREATE INDEX IF NOT EXISTS idx_s2m_chunks_embedding
   ON s2m_transcript_chunks
   USING hnsw (embedding vector_cosine_ops);
+
+-- Custom LLM providers (Anthropic, OpenAI, OpenAI-compatible, Ollama)
+-- API keys are stored as plain text. This is a single-user local app, so DB
+-- access is the threat model. Use FileVault for full disk encryption.
+CREATE TABLE IF NOT EXISTS s2m_llm_providers (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id     TEXT NOT NULL DEFAULT 'local-user',
+  label       TEXT NOT NULL,             -- e.g. "Claude Opus 4.6"
+  type        TEXT NOT NULL,             -- 'anthropic' | 'openai' | 'openai-compatible' | 'ollama'
+  base_url    TEXT,                      -- e.g. https://api.openai.com or http://localhost:11434
+  api_key     TEXT,                      -- nullable for ollama / no-auth endpoints
+  model       TEXT NOT NULL,             -- e.g. "claude-opus-4-6", "gpt-5", "gemma4:26b"
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_s2m_providers_user ON s2m_llm_providers (user_id, created_at DESC);

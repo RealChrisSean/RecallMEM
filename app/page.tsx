@@ -24,6 +24,18 @@ interface ChatListItem {
   updated_at: string;
 }
 
+interface ProviderListItem {
+  id: string;
+  label: string;
+  type: "ollama" | "anthropic" | "openai" | "openai-compatible";
+  model: string;
+}
+
+// Encoded model selection: either "ollama:gemma4:26b" (built-in) or "provider:<id>"
+type Selection =
+  | { kind: "ollama"; modelId: ModelId }
+  | { kind: "provider"; providerId: string };
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -32,6 +44,8 @@ export default function ChatPage() {
   const [mode, setMode] = useState<ModelMode>("standard");
   const [chatId, setChatId] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<ModelId>(DEFAULT_MODEL);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
+  const [customProviders, setCustomProviders] = useState<ProviderListItem[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   // Parallel array holding the raw File objects for pending text/PDF uploads.
   // Images don't need this because their content is already a data URL on attach.
@@ -150,18 +164,48 @@ export default function ChatPage() {
     }
   }
 
-  // Load the saved model on mount
+  // Load the saved model selection on mount.
+  // Encoded as "ollama:<modelId>" or "provider:<providerId>"
   useEffect(() => {
     const saved = localStorage.getItem(MODEL_STORAGE_KEY);
-    if (saved && MODEL_OPTIONS.some((m) => m.id === saved)) {
+    if (!saved) return;
+    if (saved.startsWith("provider:")) {
+      setSelectedProviderId(saved.slice("provider:".length));
+    } else if (saved.startsWith("ollama:")) {
+      const id = saved.slice("ollama:".length);
+      if (MODEL_OPTIONS.some((m) => m.id === id)) {
+        setSelectedModel(id as ModelId);
+      }
+    } else if (MODEL_OPTIONS.some((m) => m.id === saved)) {
+      // Backward compat with old format
       setSelectedModel(saved as ModelId);
     }
   }, []);
 
   // Persist model selection
   useEffect(() => {
-    localStorage.setItem(MODEL_STORAGE_KEY, selectedModel);
-  }, [selectedModel]);
+    if (selectedProviderId) {
+      localStorage.setItem(MODEL_STORAGE_KEY, `provider:${selectedProviderId}`);
+    } else {
+      localStorage.setItem(MODEL_STORAGE_KEY, `ollama:${selectedModel}`);
+    }
+  }, [selectedModel, selectedProviderId]);
+
+  // Fetch custom providers
+  async function refreshProviders() {
+    try {
+      const res = await fetch("/api/providers");
+      if (res.ok) {
+        const data = (await res.json()) as ProviderListItem[];
+        setCustomProviders(data);
+      }
+    } catch (err) {
+      console.error("Failed to load providers:", err);
+    }
+  }
+  useEffect(() => {
+    refreshProviders();
+  }, []);
 
   // Keep ref in sync so the beforeunload handler can read the latest value
   useEffect(() => {
@@ -403,7 +447,14 @@ export default function ChatPage() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: newMessages, mode, chatId, model: selectedModel }),
+        body: JSON.stringify({
+          messages: newMessages,
+          mode,
+          chatId,
+          ...(selectedProviderId
+            ? { providerId: selectedProviderId }
+            : { model: selectedModel }),
+        }),
       });
 
       if (!res.ok || !res.body) {
@@ -546,10 +597,22 @@ export default function ChatPage() {
             </span>
           )}
           <ModelPicker
-            value={selectedModel}
-            onChange={setSelectedModel}
+            modelId={selectedModel}
+            providerId={selectedProviderId}
+            onSelectOllama={(id) => {
+              setSelectedModel(id);
+              setSelectedProviderId(null);
+            }}
+            onSelectProvider={(id) => setSelectedProviderId(id)}
+            customProviders={customProviders}
             disabled={isStreaming || isFinalizing}
           />
+          <Link
+            href="/providers"
+            className="px-3 py-1.5 text-sm font-medium rounded-md border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-700 dark:text-zinc-300"
+          >
+            Providers
+          </Link>
           <Link
             href="/rules"
             className="px-3 py-1.5 text-sm font-medium rounded-md border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-700 dark:text-zinc-300"
@@ -1146,27 +1209,55 @@ function ModeToggle({
 }
 
 function ModelPicker({
-  value,
-  onChange,
+  modelId,
+  providerId,
+  onSelectOllama,
+  onSelectProvider,
+  customProviders,
   disabled,
 }: {
-  value: ModelId;
-  onChange: (v: ModelId) => void;
+  modelId: ModelId;
+  providerId: string | null;
+  onSelectOllama: (id: ModelId) => void;
+  onSelectProvider: (id: string) => void;
+  customProviders: ProviderListItem[];
   disabled: boolean;
 }) {
+  // Encode current selection as a string for the <select>
+  const value = providerId ? `provider:${providerId}` : `ollama:${modelId}`;
+
+  function handleChange(v: string) {
+    if (v.startsWith("provider:")) {
+      onSelectProvider(v.slice("provider:".length));
+    } else if (v.startsWith("ollama:")) {
+      onSelectOllama(v.slice("ollama:".length) as ModelId);
+    }
+  }
+
   return (
     <div className="relative">
       <select
         value={value}
-        onChange={(e) => onChange(e.target.value as ModelId)}
+        onChange={(e) => handleChange(e.target.value)}
         disabled={disabled}
         className="appearance-none px-3 py-1.5 pr-8 text-xs font-medium rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700"
       >
-        {MODEL_OPTIONS.map((opt) => (
-          <option key={opt.id} value={opt.id}>
-            {opt.label}
-          </option>
-        ))}
+        <optgroup label="Local (Ollama)">
+          {MODEL_OPTIONS.map((opt) => (
+            <option key={opt.id} value={`ollama:${opt.id}`}>
+              {opt.label}
+            </option>
+          ))}
+        </optgroup>
+        {customProviders.length > 0 && (
+          <optgroup label="Custom providers">
+            {customProviders.map((p) => (
+              <option key={p.id} value={`provider:${p.id}`}>
+                {p.label}
+              </option>
+            ))}
+          </optgroup>
+        )}
       </select>
       <svg
         className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-zinc-400"

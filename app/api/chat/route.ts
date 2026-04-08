@@ -13,6 +13,7 @@ export async function POST(req: NextRequest) {
       mode?: ModelMode;
       chatId?: string;
       model?: string;
+      providerId?: string;
     };
 
     if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
@@ -59,7 +60,7 @@ export async function POST(req: NextRequest) {
         );
 
         try {
-          for await (const chunk of chatStream(llmMessages, { mode, model: body.model })) {
+          for await (const chunk of chatStream(llmMessages, { mode, model: body.model, providerId: body.providerId })) {
             if (chunk.delta) {
               assistantContent += chunk.delta;
               const data = JSON.stringify({ delta: chunk.delta });
