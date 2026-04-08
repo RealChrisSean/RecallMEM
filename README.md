@@ -33,6 +33,13 @@ That's the install. One command. The CLI handles the rest. It clones the repo, s
 
 I wanted my own private AI for the kind of conversations I don't want sitting on someone else's server. Personal stuff. The stuff you'd actually want a real friend to help you think through.
 
+The default model is **Gemma 4** (Google's open weights model that just dropped, Apache 2.0) running locally via Ollama. You can pick any size from E2B (runs on a phone) up to the 31B Dense (best quality, needs a workstation). Or skip Ollama entirely and bring your own API key for Claude, GPT, Groq, Together, OpenRouter, or anything OpenAI-compatible. Your call.
+
+The thing is, the memory is the actual differentiator. Not the model. Not the UI. The memory. The AI builds a profile of who you are over time. It extracts facts after every conversation. It vector-searches across every chat you've ever had to find relevant context. By the time you've used it for a week, it knows you better than ChatGPT ever will, because ChatGPT forgets you the second you close the tab.
+
+<details>
+<summary><strong>The longer version (what's wrong with every other "private AI" tool)</strong></summary>
+
 Here's the problem with every "private AI" tool I tried: they all fall into one of three buckets.
 
 1. **Local chat UIs for Ollama.** Look pretty, but the AI has zero memory between conversations. Every chat is a stranger.
@@ -41,15 +48,39 @@ Here's the problem with every "private AI" tool I tried: they all fall into one 
 
 There's a gap right in the middle: a **complete personal AI app with real working memory that runs 100% on your machine**. So I built it.
 
-The default model is **Gemma 4** (Google's open weights model that just dropped, Apache 2.0) running locally via Ollama. You can pick any size from E2B (runs on a phone) up to the 31B Dense (best quality, needs a workstation). Or skip Ollama entirely and bring your own API key for Claude, GPT, Groq, Together, OpenRouter, or anything OpenAI-compatible. Your call.
-
-The thing is, the memory is the actual differentiator. Not the model. Not the UI. The memory. The AI builds a profile of who you are over time. It extracts facts after every conversation. It vector-searches across every chat you've ever had to find relevant context. By the time you've used it for a week, it knows you better than ChatGPT ever will, because ChatGPT forgets you the second you close the tab.
+</details>
 
 ---
 
-## How is this different from X?
+## What it does
 
-Here's the honest comparison. I'll list real competitors by name.
+Persistent memory across every chat (profile + facts + vector search). Auto-extracts facts from your conversations. Auto-builds a profile of who you are. Vector search over every past chat. Memory inspector you can edit. Custom rules. Wipe memory unrecoverably. File uploads (images, PDFs, code). Bring your own LLM (Ollama, Anthropic, OpenAI, or any OpenAI-compatible API).
+
+<details>
+<summary><strong>Full feature list</strong></summary>
+
+- **Persistent memory across every chat.** Three layers: a synthesized profile of who you are, an extracted facts table, and vector search over all past conversations.
+- **Auto-extracts facts** after every conversation. Categorized into Identity, Family, Work, Health, Interests, etc.
+- **Auto-builds your profile** from the extracted facts. Updates after every chat.
+- **Vector search over every past conversation.** Ask about something you discussed last month, the AI finds it and uses it as context.
+- **Memory inspector page.** View, edit, or delete every fact the AI has learned. You're in control.
+- **Custom rules.** Tell the AI how you want to be talked to. "Don't gaslight me." "I have dyslexia, no bullet points." "Don't add disclaimers." It applies them in every chat.
+- **Wipe memory unrecoverably.** `DELETE` + `VACUUM FULL` + `CHECKPOINT`. Gone for good at the database level.
+- **File uploads.** Drag and drop images, PDFs, code, text. Gemma 4 handles vision natively.
+- **Chat history sidebar** with date grouping, search, and pinned chats.
+- **Markdown rendering** for headings, code blocks, tables.
+- **Streaming responses.**
+- **Bring any LLM you want.** Local Gemma 4 via Ollama, or plug in Anthropic (Claude), OpenAI (GPT), or any OpenAI-compatible API (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio, etc).
+- **Test connection** for cloud providers before saving the API key, so you don't find out your key is wrong mid-chat.
+
+</details>
+
+---
+
+## How is this different?
+
+<details>
+<summary><strong>Comparison table vs ChatGPT, Claude.ai, and Mem0</strong></summary>
 
 | | RecallMEM | ChatGPT / Claude.ai | Mem0 |
 |---|---|---|---|
@@ -65,7 +96,10 @@ Here's the honest comparison. I'll list real competitors by name.
 | **Free** | ✅ | partial | partial |
 | **Source available** | ✅ Apache 2.0 | ❌ | partial |
 
-## The actual differentiator nobody talks about
+</details>
+
+<details>
+<summary><strong>The actual differentiator nobody talks about (deterministic memory)</strong></summary>
 
 The thing nobody is doing right is **how memory is read and written**.
 
@@ -107,11 +141,16 @@ After all six steps, the surviving facts get a plain SQL `INSERT`. And even then
 
 This is the actual reason RecallMEM exists. Not "another local chat UI." A memory architecture where the LLM is intentionally not in charge.
 
+</details>
+
 ---
 
-## The memory framework underneath (for developers)
+## For developers (the memory framework)
 
-If you're a developer reading this, here's the part that should interest you. Underneath the chat UI, RecallMEM is a **deterministic memory framework** you can fork and use in your own AI app. The whole `lib/` folder is intentionally framework-shaped. It's not a polished SDK with a public API contract, but it IS a working, opinionated memory architecture that you can copy into your own project and adapt.
+Underneath the chat UI, RecallMEM is a **deterministic memory framework** you can fork and use in your own AI app. The whole `lib/` folder is intentionally framework-shaped. It's not a polished SDK with a public API contract, but it IS a working, opinionated memory architecture you can copy into your own project.
+
+<details>
+<summary><strong>What's in <code>lib/</code> and how to embed it in your app</strong></summary>
 
 **The core files in `lib/`:**
 
@@ -180,49 +219,22 @@ The memory framework doesn't care which LLM you use. It just assembles context. 
 
 **The schema lives in `migrations/001_init.sql`.** Run it against any Postgres 17+ database with the pgvector extension installed. Tables are prefixed `s2m_` (for "speak2me," the project this came from). Rename them in the migration if you want a different prefix.
 
-**License:** Apache 2.0. Fork it, modify it, ship it commercially. The only ask is that you preserve the copyright notice and the NOTICE file. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full guide on using the framework in your own app.
+**License:** Apache 2.0. Fork it, modify it, ship it commercially. The only ask is that you preserve the copyright notice and the NOTICE file. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full guide.
+
+</details>
 
 ---
 
-## What it does
-
-- **Persistent memory across every chat.** Three layers: a synthesized profile of who you are, an extracted facts table, and vector search over all past conversations.
-- **Auto-extracts facts** after every conversation. Categorized into Identity, Family, Work, Health, Interests, etc.
-- **Auto-builds your profile** from the extracted facts. Updates after every chat.
-- **Vector search over every past conversation.** Ask about something you discussed last month, the AI finds it and uses it as context.
-- **Memory inspector page.** View, edit, or delete every fact the AI has learned. You're in control.
-- **Custom rules.** Tell the AI how you want to be talked to. "Don't gaslight me." "I have dyslexia, no bullet points." "Don't add disclaimers." It applies them in every chat.
-- **Wipe memory unrecoverably.** `DELETE` + `VACUUM FULL` + `CHECKPOINT`. Gone for good at the database level.
-- **File uploads.** Drag and drop images, PDFs, code, text. Gemma 4 handles vision natively.
-- **Chat history sidebar** with date grouping, search, and pinned chats.
-- **Markdown rendering** for headings, code blocks, tables.
-- **Streaming responses.**
-- **Bring any LLM you want.** Local Gemma 4 via Ollama, or plug in Anthropic (Claude), OpenAI (GPT), or any OpenAI-compatible API (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio, etc).
-- **Test connection** for cloud providers before saving the API key, so you don't find out your key is wrong mid-chat.
-
----
-
-## Quick Start
+## Quick start
 
 ```bash
 npx recallmem
 ```
 
-That's the whole install for use case 1 (just want to use it).
+You need three things on your machine first: **Node.js 20+**, **Postgres 17 with pgvector**, and **Ollama** (optional, skip if you only want cloud providers). If any are missing, the CLI tells you exactly what to install for your OS.
 
-You need three things on your machine first:
-
-1. **Node.js 20+**
-2. **Postgres 17 with pgvector** (the database)
-3. **Ollama** (optional, skip if you only want to use cloud providers like Claude or GPT)
-
-If any of those are missing, the CLI tells you exactly what to install for your OS. After that, `npx recallmem` does everything else.
-
----
-
-## How it works
-
-Three diagrams. The whole architecture in 30 seconds.
+<details>
+<summary><strong>Architecture diagrams (system, memory layers, post-chat sequence)</strong></summary>
 
 ### System architecture
 
@@ -248,9 +260,7 @@ flowchart TB
 
 Everything in green runs on your machine. The dashed cloud box only activates if you explicitly add a cloud provider in settings. Otherwise, nothing leaves your computer. Ever.
 
-### The memory system
-
-This is the part most "local AI" tools don't have. Three layers stacked together so the AI can actually remember you.
+### The three-layer memory system
 
 ```mermaid
 flowchart LR
@@ -313,9 +323,10 @@ sequenceDiagram
 
 Click "New chat", wait a few seconds, and the next conversation immediately sees the new memory.
 
----
+</details>
 
-## Hardware
+<details>
+<summary><strong>Hardware requirements (which model fits which machine)</strong></summary>
 
 The biggest variable is which LLM you pick. RecallMEM lets you choose.
 
@@ -342,9 +353,10 @@ You bring your own API key. The database, memory, profile, and rules still stay 
 
 **One thing to know:** when you use a cloud provider, your conversation goes to their servers. Your facts and profile get sent as part of the system prompt so the cloud LLM has context. This breaks the local-only guarantee for those specific conversations. Use Ollama for anything you want fully private.
 
----
+</details>
 
-## CLI commands
+<details>
+<summary><strong>CLI commands</strong></summary>
 
 ```bash
 npx recallmem            # Setup if needed, then start the app
@@ -360,9 +372,10 @@ The default `npx recallmem` is what you'll use 99% of the time. It's smart about
 
 If something breaks, run `npx recallmem doctor` first. It tells you exactly what's wrong and how to fix it.
 
----
+</details>
 
-## Two ways to use it
+<details>
+<summary><strong>Two ways to use it (just-run-it vs fork-and-hack)</strong></summary>
 
 The `npx recallmem` command auto-detects which workflow you're in.
 
@@ -411,9 +424,10 @@ Same `npx recallmem` command. Different behavior because the CLI is smart about 
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for the dev workflow.
 
----
+</details>
 
-## Where things live
+<details>
+<summary><strong>Where things live on disk (and how to fully uninstall)</strong></summary>
 
 The default install location is `~/.recallmem`. Override with `RECALLMEM_HOME=/custom/path npx recallmem` if you want it somewhere else.
 
@@ -435,9 +449,16 @@ rm -rf ~/.recallmem        # Remove the app
 dropdb recallmem           # Remove the database (or use the in-app "Nuke everything" button first)
 ```
 
+</details>
+
 ---
 
 ## Privacy
+
+If you only use Ollama, **nothing leaves your machine, ever**. You can air-gap the computer and it keeps working. If you add a cloud provider (Claude, GPT, etc.), only the chat messages and your assembled system prompt go to that provider's servers. Your database, embeddings, and saved API keys stay local.
+
+<details>
+<summary><strong>Privacy diagram + truly unrecoverable deletion</strong></summary>
 
 ```mermaid
 flowchart TB
@@ -475,8 +496,6 @@ flowchart TB
 - The current conversation messages
 - The system prompt (which includes your profile, facts, and rules so the cloud LLM has context)
 
-If you only use Ollama, **nothing leaves your machine, ever**. You can air-gap the computer and it keeps working.
-
 ### Truly unrecoverable deletion
 
 When you click "Wipe memory" or "Nuke everything" on the Memory page, the app runs:
@@ -489,9 +508,12 @@ After those three steps, the data is gone from the database in any practically r
 
 **One thing I want to be honest about:** filesystem-level forensic recovery (raw disk block scanning) is a separate problem. SSDs have wear leveling, so file overwrites don't always touch the original physical cells. The complete solution is **full-disk encryption** (FileVault on Mac, LUKS on Linux, BitLocker on Windows). With disk encryption and a strong login password, the data is genuinely unrecoverable. Not even Apple could read it.
 
+</details>
+
 ---
 
-## What it doesn't do (yet)
+<details>
+<summary><strong>What it doesn't do (yet), honest limitations</strong></summary>
 
 I'm being honest about the limitations. This is v0.1.
 
@@ -502,9 +524,10 @@ I'm being honest about the limitations. This is v0.1.
 - **OpenAI vision isn't fully wired up.** Gemma 4 (4B and up) handles images natively via Ollama. OpenAI uses a different format that I haven't plumbed through. Use Ollama or Anthropic for images.
 - **No mobile app.** It's a web app you run locally. You access it from your browser at `localhost:3000`. A native iOS/Android app is theoretically possible but it's a separate project I haven't started.
 
----
+</details>
 
-## Tech stack
+<details>
+<summary><strong>Tech stack</strong></summary>
 
 - **Frontend / Backend:** Next.js 16 (App Router) + TypeScript + Tailwind CSS v4
 - **Database:** Postgres 17 + pgvector (HNSW vector indexes)
@@ -514,14 +537,12 @@ I'm being honest about the limitations. This is v0.1.
 - **Markdown rendering:** react-markdown + remark-gfm + @tailwindcss/typography
 - **Cloud LLM transports (optional):** Anthropic Messages API, OpenAI Chat Completions, OpenAI-compatible
 
----
-
-## Manual install (for the curious)
-
-If you want to know what `npx recallmem` is doing under the hood, or you don't want to use the CLI for some reason, here's the manual install.
+</details>
 
 <details>
-<summary>Expand to see the manual install steps</summary>
+<summary><strong>Manual install (for the curious or for when <code>npx recallmem</code> can't be used)</strong></summary>
+
+If you want to know what `npx recallmem` is doing under the hood, or you don't want to use the CLI for some reason, here's the manual install.
 
 ### macOS
 
@@ -600,9 +621,8 @@ Open [http://localhost:3000](http://localhost:3000).
 
 </details>
 
----
-
-## Troubleshooting
+<details>
+<summary><strong>Troubleshooting (the real gotchas I hit)</strong></summary>
 
 Stuff I've actually hit. If you run into something else, run `npx recallmem doctor` first. It tells you exactly what's broken.
 
@@ -640,6 +660,8 @@ Make sure you click "New chat" (or switch to another chat in the sidebar) to tri
 
 The fix: always click "New chat" or switch chats in the sidebar before closing the browser if you said something you want remembered.
 
+</details>
+
 ---
 
 ## Contributing
@@ -648,15 +670,9 @@ Forks, PRs, bug reports, ideas, all welcome. See [CONTRIBUTING.md](./CONTRIBUTIN
 
 If you build something cool on top of RecallMEM, I'd love to hear about it.
 
----
-
 ## License
 
-Apache License 2.0. See [LICENSE](./LICENSE) for the full text and [NOTICE](./NOTICE) for third-party attributions.
-
-You can use, modify, fork, and redistribute this for any purpose, personal or commercial. The license includes a patent grant and the standard "no warranty, no liability" disclaimer.
-
----
+Apache License 2.0. See [LICENSE](./LICENSE) for the full text and [NOTICE](./NOTICE) for third-party attributions. You can use, modify, fork, and redistribute this for any purpose, personal or commercial. The license includes a patent grant and the standard "no warranty, no liability" disclaimer.
 
 ## Status
 
