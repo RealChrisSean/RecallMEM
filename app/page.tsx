@@ -57,6 +57,8 @@ export default function ChatPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [webSearch, setWebSearch] = useState(false);
+  const [showWebSearchWarning, setShowWebSearchWarning] = useState(false);
+  const [dontShowWebSearchWarning, setDontShowWebSearchWarning] = useState(false);
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const chatIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -710,16 +712,10 @@ export default function ChatPage() {
             disabled={isStreaming || isFinalizing}
           />
           <Link
-            href="/providers"
+            href="/settings"
             className="px-3 py-1.5 text-sm font-medium rounded-md border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-700 dark:text-zinc-300"
           >
-            Providers
-          </Link>
-          <Link
-            href="/rules"
-            className="px-3 py-1.5 text-sm font-mono font-medium rounded-md border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-700 dark:text-zinc-300"
-          >
-            RULES.md
+            Settings
           </Link>
           <Link
             href="/memory"
@@ -738,9 +734,16 @@ export default function ChatPage() {
           <button
             onClick={newChat}
             disabled={isStreaming || isFinalizing || messages.length === 0}
-            className="px-3 py-1.5 text-sm font-medium rounded-md border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-zinc-700 dark:text-zinc-300"
+            title="New chat"
+            aria-label="New chat"
+            className="group relative w-9 h-9 flex items-center justify-center rounded-md border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-zinc-700 dark:text-zinc-300"
           >
-            New Chat
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            <span className="pointer-events-none absolute top-full right-0 mt-1.5 px-2 py-1 text-[10px] font-medium rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-md z-50">
+              New chat
+            </span>
           </button>
         </div>
       </header>
@@ -797,13 +800,36 @@ export default function ChatPage() {
             </button>
             {(() => {
               const sel = customProviders.find((p) => p.id === selectedProviderId);
-              const supportsWebSearch = sel?.type === "anthropic";
+              // Show for Anthropic (native tool) and for local Ollama
+              // (we proxy via Brave). OpenAI not wired yet.
+              const isLocal = !selectedProviderId; // built-in local model
+              const isAnthropic = sel?.type === "anthropic";
+              const isOllamaCustom = sel?.type === "ollama";
+              const supportsWebSearch = isAnthropic || isLocal || isOllamaCustom;
               if (!supportsWebSearch) return null;
+              const isThirdParty = isLocal || isOllamaCustom;
               return (
                 <div className="absolute left-11 top-1/2 -translate-y-1/2 group">
                   <button
                     type="button"
-                    onClick={() => setWebSearch((v) => !v)}
+                    onClick={() => {
+                      if (!webSearch) {
+                        // Turning ON. For local providers, show the privacy
+                        // warning the first time only.
+                        if (isThirdParty) {
+                          const acknowledged = localStorage.getItem(
+                            "recallmem.webSearchAcknowledged"
+                          );
+                          if (!acknowledged) {
+                            setShowWebSearchWarning(true);
+                            return;
+                          }
+                        }
+                        setWebSearch(true);
+                      } else {
+                        setWebSearch(false);
+                      }
+                    }}
                     disabled={isStreaming}
                     className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
                       webSearch
@@ -818,7 +844,13 @@ export default function ChatPage() {
                     </svg>
                   </button>
                   <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 text-[10px] font-medium leading-snug rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-md z-50">
-                    {webSearch ? "Web search on - Claude can browse the web" : "Web search off - click to let Claude browse the web"}
+                    {webSearch
+                      ? isThirdParty
+                        ? "Web search on - queries go to Brave"
+                        : "Web search on - Claude can browse the web"
+                      : isThirdParty
+                        ? "Web search off - click to enable (uses Brave)"
+                        : "Web search off - click to let Claude browse the web"}
                   </span>
                 </div>
               );
@@ -828,11 +860,15 @@ export default function ChatPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Message RecallMEM..."
+              placeholder="Ask me anything"
               rows={1}
               disabled={isStreaming}
               className={`w-full resize-none rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ${
-                customProviders.find((p) => p.id === selectedProviderId)?.type === "anthropic" ? "pl-20" : "pl-12"
+                (() => {
+                  const sel = customProviders.find((p) => p.id === selectedProviderId);
+                  const showsGlobe = sel?.type === "anthropic" || sel?.type === "ollama" || !selectedProviderId;
+                  return showsGlobe ? "pl-20" : "pl-12";
+                })()
               } pr-12 py-3 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700 disabled:opacity-50`}
             />
             <button
@@ -856,6 +892,98 @@ export default function ChatPage() {
             <div className="text-zinc-700 dark:text-zinc-200 font-medium">Drop files to attach</div>
             <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
               Images, PDFs, text, code
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* First-time web search privacy warning (local providers only) */}
+      {showWebSearchWarning && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-lg shadow-xl">
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
+              Web search needs a free Brave Search API key
+            </h2>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4 leading-relaxed">
+              Local models (Gemma) can&apos;t browse the web on their own, so RecallMEM uses Brave Search as a backend. The free tier gives you 2,000 searches per month, which is plenty for personal use.
+            </p>
+
+            <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-3 mb-4">
+              <div className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-2">
+                Setup (one time, ~5 minutes)
+              </div>
+              <ol className="text-sm text-zinc-700 dark:text-zinc-300 space-y-1.5 list-decimal list-inside">
+                <li>
+                  Sign up at{" "}
+                  <a
+                    href="https://brave.com/search/api"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-blue-600 dark:text-blue-400 underline"
+                  >
+                    brave.com/search/api
+                  </a>
+                </li>
+                <li>Pick the Free tier and grab your API key</li>
+                <li>
+                  Paste it into{" "}
+                  <Link
+                    href="/settings"
+                    className="text-blue-600 dark:text-blue-400 underline"
+                  >
+                    Settings
+                  </Link>{" "}
+                  and click Save
+                </li>
+              </ol>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-2">
+                If you skip this, the toggle still works but the AI will tell you to set up the key.
+              </div>
+            </div>
+
+            <div className="text-sm space-y-2 mb-5">
+              <div className="text-zinc-700 dark:text-zinc-300">
+                <strong>Brave will see:</strong> the text of your message (used as the search query)
+              </div>
+              <div className="text-zinc-700 dark:text-zinc-300">
+                <strong>Brave will NOT see:</strong> your memory, profile, facts, past conversations, or anything else stored locally
+              </div>
+            </div>
+            <p className="text-xs text-zinc-500 dark:text-zinc-500 mb-4">
+              You can turn web search off at any time.
+            </p>
+            <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300 mb-5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={dontShowWebSearchWarning}
+                onChange={(e) => setDontShowWebSearchWarning(e.target.checked)}
+                className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 cursor-pointer"
+              />
+              Don&apos;t show this again
+            </label>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => {
+                  setShowWebSearchWarning(false);
+                  setDontShowWebSearchWarning(false);
+                }}
+                className="px-4 py-2 text-sm font-medium rounded-md border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (dontShowWebSearchWarning) {
+                    localStorage.setItem("recallmem.webSearchAcknowledged", "true");
+                  }
+                  setWebSearch(true);
+                  setShowWebSearchWarning(false);
+                  setDontShowWebSearchWarning(false);
+                }}
+                className="px-4 py-2 text-sm font-medium rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+              >
+                Got it, enable web search
+              </button>
             </div>
           </div>
         </div>
@@ -1500,6 +1628,10 @@ function ModelPicker({
   const value = providerId ? `provider:${providerId}` : `ollama:${modelId}`;
 
   function handleChange(v: string) {
+    if (v === "__add_provider__") {
+      window.location.href = "/providers";
+      return;
+    }
     if (v.startsWith("provider:")) {
       onSelectProvider(v.slice("provider:".length));
     } else if (v.startsWith("ollama:")) {
@@ -1519,6 +1651,7 @@ function ModelPicker({
           {MODEL_OPTIONS.map((opt) => (
             <option key={opt.id} value={`ollama:${opt.id}`}>
               {opt.label}
+              {opt.recommended ? "  ★ Recommended" : ""}
             </option>
           ))}
         </optgroup>
@@ -1531,6 +1664,9 @@ function ModelPicker({
             ))}
           </optgroup>
         )}
+        <optgroup label="">
+          <option value="__add_provider__">+ Add provider...</option>
+        </optgroup>
       </select>
       <svg
         className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-zinc-400"

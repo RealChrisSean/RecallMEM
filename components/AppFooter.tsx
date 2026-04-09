@@ -10,9 +10,25 @@ export function AppFooter({
 }) {
   if (variant === "page") {
     return (
-      <div className="border-t border-zinc-200 dark:border-zinc-800 mt-12 pt-6 pb-8 flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-500">
-        <p>© 2026 Chris Dabatos. Made with code &amp; caffeine in Las Vegas.</p>
+      <div className="border-t border-zinc-200 dark:border-zinc-800 mt-12 pt-6 pb-8 flex items-center justify-between text-xs text-[#1f1f1f] dark:text-zinc-300">
+        <p>
+          © 2026{" "}
+          <a
+            href="https://chrisdabatos.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline"
+          >
+            Chris Dabatos
+          </a>
+          . Made with code &amp; caffeine in Las Vegas.
+        </p>
         <div className="flex items-center gap-3">
+          <SocialLink
+            href="https://chrisdabatos.com"
+            label="Personal site"
+            icon={<GlobeIcon />}
+          />
           <SocialLink
             href="https://github.com/RealChrisSean"
             label="GitHub"
@@ -31,10 +47,23 @@ export function AppFooter({
   // Sidebar variant: short copyright on the left, icons on the right, single row.
   return (
     <div className="border-t border-zinc-200 dark:border-zinc-800 px-4 py-3 flex items-center justify-between gap-3">
-      <p className="text-[11px] text-zinc-500 dark:text-zinc-500">
-        © 2026 Chris Dabatos
+      <p className="text-[11px] text-[#1f1f1f] dark:text-zinc-300">
+        © 2026{" "}
+        <a
+          href="https://chrisdabatos.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:underline"
+        >
+          Chris Dabatos
+        </a>
       </p>
       <div className="flex items-center gap-3 flex-shrink-0">
+        <SocialLink
+          href="https://chrisdabatos.com"
+          label="Personal site"
+          icon={<GlobeIcon />}
+        />
         <SocialLink
           href="https://github.com/RealChrisSean"
           label="GitHub"
@@ -65,10 +94,30 @@ function SocialLink({
       target="_blank"
       rel="noopener noreferrer"
       aria-label={label}
-      className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+      className="text-[#1f1f1f] dark:text-zinc-300 hover:opacity-70 transition-opacity"
     >
       {icon}
     </a>
+  );
+}
+
+function GlobeIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
   );
 }
 

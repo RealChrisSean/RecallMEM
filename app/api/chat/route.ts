@@ -4,6 +4,8 @@ import { createChat, updateChat, getChat } from "@/lib/chats";
 import { buildMemoryAwareSystemPrompt } from "@/lib/memory";
 import { generateTitleIfMissing, extractFactsLive } from "@/lib/post-chat";
 import { getLangfuse } from "@/lib/langfuse";
+import { searchWeb, formatWebOutcome } from "@/lib/web-search";
+import { getProvider } from "@/lib/providers";
 import type { Message } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -67,13 +69,47 @@ export async function POST(req: NextRequest) {
       name: "build-memory-prompt",
       input: { query: latestUserMessage.content, chatId },
     });
-    const systemPromptText = await buildMemoryAwareSystemPrompt(
+    let systemPromptText = await buildMemoryAwareSystemPrompt(
       latestUserMessage.content,
       chatId
     );
     memorySpan?.end({
       output: { promptLength: systemPromptText.length },
     });
+
+    // Web search for local providers (Ollama). Anthropic gets web search via
+    // its own native tool downstream; OpenAI is not wired yet. For Ollama
+    // and "no provider" (built-in local), we do the search ourselves and
+    // prepend results to the system prompt as live context. This is the
+    // ONLY place in the local path where the user's query leaves the
+    // machine - explicitly opt-in via the UI toggle, with a one-time
+    // privacy warning the first time the user enables it.
+    if (body.webSearch) {
+      let providerType: string | null = null;
+      if (body.providerId) {
+        const row = await getProvider(body.providerId);
+        providerType = row?.type || null;
+      } else {
+        providerType = "ollama"; // default local
+      }
+      if (providerType === "ollama") {
+        const webSpan = trace?.span({
+          name: "web-search-brave",
+          input: { query: latestUserMessage.content },
+        });
+        const outcome = await searchWeb(latestUserMessage.content);
+        webSpan?.end({
+          output: { status: outcome.status, count: outcome.results.length },
+        });
+        // Always inject the formatted block - even on failure - so the
+        // model knows to tell the user what happened instead of silently
+        // answering as if no search was attempted.
+        const block = formatWebOutcome(outcome);
+        if (block) {
+          systemPromptText = `${block}\n\n${systemPromptText}`;
+        }
+      }
+    }
 
     // Detect a resumed chat: if the chat was last touched more than 2 hours
     // ago and there are existing messages, inject a single system marker
