@@ -40,6 +40,9 @@ The features that I want next but didn't make v0.1.
 ### Easier install
 - [ ] **Docker Compose for Postgres + Next.js** (Option A from the design discussion). One `docker compose up` removes the Postgres + pgvector install pain. Ollama still runs on host so Mac users keep Metal acceleration. Skip the all-in-one container approach because containerized Ollama on Mac loses GPU and drops generation from ~30 tok/s to ~5-8 tok/s, which defeats the entire local-LLM use case.
 
+### External databases
+- [ ] **Connect to external Postgres-compatible databases** (Lakebase, Neon, Supabase, CockroachDB, Yugabyte, etc). Settings page field where the user pastes a connection string. Test connection button. Migrations run against the remote DB. The `configureDb({ pool })` architecture already supports swapping the pool — the missing piece is a UI for it and hot-reloading the pool at runtime without restarting the server.
+
 ## v0.3 (later)
 
 ### Export / backup / migration
