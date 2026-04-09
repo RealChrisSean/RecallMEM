@@ -9,7 +9,9 @@
   <strong>Persistent Private AI.</strong> Powered by Gemma 4 running locally on your own machine.
 </p>
 
-**Just want to install it?** Jump straight to [Quick start](#quick-start).
+<p align="center">
+  <strong>Just want to install it?</strong> Jump straight to <a href="#quick-start">Quick start</a>.
+</p>
 
 
 <p align="center">
