@@ -63,21 +63,25 @@ export function AppFooter({
       </p>
       <div className="flex flex-col items-end gap-1 flex-shrink-0">
         <div className="flex items-center gap-3">
-        <SocialLink
-          href="https://chrisdabatos.com"
-          label="Personal site"
-          icon={<GlobeIcon />}
-        />
-        <SocialLink
-          href="https://github.com/RealChrisSean"
-          label="GitHub"
-          icon={<GithubIcon />}
-        />
-        <SocialLink
-          href="https://x.com/realchrissean"
-          label="X (Twitter)"
-          icon={<XIconBrand />}
-        />
+          <SocialLink
+            href="https://chrisdabatos.com"
+            label="Personal site"
+            icon={<GlobeIcon />}
+          />
+          <SocialLink
+            href="https://github.com/RealChrisSean"
+            label="GitHub"
+            icon={<GithubIcon />}
+          />
+          <SocialLink
+            href="https://x.com/realchrissean"
+            label="X (Twitter)"
+            icon={<XIconBrand />}
+          />
+        </div>
+        <span className="text-[9px] text-zinc-400 dark:text-zinc-600">
+          v{process.env.NEXT_PUBLIC_APP_VERSION}
+        </span>
       </div>
     </div>
   );
