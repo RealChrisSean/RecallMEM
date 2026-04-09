@@ -25,7 +25,13 @@ npx recallmem
 
 That's the install. One command. The CLI handles the rest. It clones the repo, sets up the database, pulls the local AI models, writes the config file, opens the chat in your browser. If you've already got Node, Postgres, and Ollama installed, you're chatting with your own private AI in about 5 minutes.
 
-> **Demo:** [demo gif goes here]
+<p align="center">
+  <img src="./public/screenshots/demo.png" alt="RecallMEM chat UI showing the AI remembering the user's name across conversations" width="900">
+</p>
+
+<p align="center">
+  <em>Two chats. Different sessions. The AI remembers.</em>
+</p>
 
 ---
 
