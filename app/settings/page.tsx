@@ -184,6 +184,9 @@ export default function SettingsPage() {
               <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
                 Settings
               </h1>
+              <span className="text-[10px] text-zinc-400 dark:text-zinc-600 ml-1">
+                v{process.env.NEXT_PUBLIC_APP_VERSION}
+              </span>
             </div>
           </div>
         </div>

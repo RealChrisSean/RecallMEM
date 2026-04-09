@@ -47,17 +47,22 @@ export function AppFooter({
   // Sidebar variant: short copyright on the left, icons on the right, single row.
   return (
     <div className="border-t border-zinc-200 dark:border-zinc-800 px-4 py-3 flex items-center justify-between gap-3">
-      <p className="text-[11px] text-[#1f1f1f] dark:text-zinc-300">
-        © 2026{" "}
-        <a
-          href="https://chrisdabatos.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:underline"
-        >
-          Chris Dabatos
-        </a>
-      </p>
+      <div className="flex items-center gap-2">
+        <p className="text-[11px] text-[#1f1f1f] dark:text-zinc-300">
+          © 2026{" "}
+          <a
+            href="https://chrisdabatos.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline"
+          >
+            Chris Dabatos
+          </a>
+        </p>
+        <span className="text-[9px] text-zinc-400 dark:text-zinc-600">
+          v{process.env.NEXT_PUBLIC_APP_VERSION}
+        </span>
+      </div>
       <div className="flex items-center gap-3 flex-shrink-0">
         <SocialLink
           href="https://chrisdabatos.com"
