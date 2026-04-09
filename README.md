@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  LLMs like ChatGPT, Claude.ai, and Gemini tend to forget you the moment you end your session. RecallMEM doesn't. It builds a profile of who you are, extracts facts after every conversation, and runs vector search across your entire history to find relevant context. By the time you've used it for a week, it knows you better than any AI ever will.
+  Chatbots like ChatGPT, Claude, and Gemini tend to forget you the moment you end your session. RecallMEM doesn't. It builds a profile of who you are, extracts facts after every conversation, and runs vector search across your entire history to find relevant context. By the time you've used it for a week, it knows you better than any AI ever will.
 </p>
 
 <p align="center">
