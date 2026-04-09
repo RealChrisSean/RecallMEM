@@ -40,9 +40,11 @@ The memory is the actual differentiator. Not the model. Not the UI. Memory reads
 - **Wipe memory unrecoverably** with `DELETE` + `VACUUM FULL` + `CHECKPOINT`
 - **Bring any LLM.** Ollama, Anthropic, OpenAI, or any OpenAI-compatible API.
 
-## Quick start
+## Quick start (Mac)
 
-**Prerequisites:** Node.js 20+ and [Homebrew](https://brew.sh) (Mac).
+RecallMEM is built and tested on macOS. Mac is the supported platform.
+
+**Prerequisites:** Node.js 20+ and [Homebrew](https://brew.sh).
 
 ```bash
 npx recallmem
@@ -66,7 +68,9 @@ After the app starts, go to **Settings → Providers → Add a new provider**, p
 </details>
 
 <details>
-<summary><strong>Linux</strong></summary>
+<summary><strong>Linux (not officially supported, manual install)</strong></summary>
+
+Auto-install isn't wired up for Linux. You'll need to install everything by hand:
 
 ```bash
 # Postgres + pgvector (apt example)
@@ -86,9 +90,9 @@ npx recallmem
 </details>
 
 <details>
-<summary><strong>Windows</strong></summary>
+<summary><strong>Windows (not supported, use WSL2)</strong></summary>
 
-Use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) with Ubuntu and follow the Linux steps above.
+Native Windows is not supported. Use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) with Ubuntu and follow the Linux steps above inside WSL.
 
 </details>
 
