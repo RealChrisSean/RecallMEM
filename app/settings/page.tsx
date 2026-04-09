@@ -262,6 +262,9 @@ export default function SettingsPage() {
             <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4 leading-relaxed">
               Download or remove Gemma 4 chat models without leaving the app. The model you pick from the dropdown in chat needs to be installed here first.
             </p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-500 mb-4 leading-relaxed">
+              <strong>Heads up:</strong> memory extraction uses whichever model you&apos;re currently chatting with. Local models are free. Cloud providers (Claude, OpenAI) cost a few cents per turn for the extra extraction call.
+            </p>
 
             <div className="space-y-3">
               {MODEL_OPTIONS.map((opt) => {

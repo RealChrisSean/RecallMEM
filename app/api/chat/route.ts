@@ -188,7 +188,13 @@ export async function POST(req: NextRequest) {
                 ...body.messages,
                 { role: "assistant", content: assistantContent },
               ];
-              await updateChat(finalChatId, fullMessages);
+              // Record which model + provider was used so the post-chat
+              // pipeline can extract facts with the same LLM the user
+              // was actually chatting with.
+              await updateChat(finalChatId, fullMessages, {
+                model: body.model || null,
+                providerId: body.providerId || null,
+              });
 
               // Fire-and-forget: generate the chat title right after the first
               // exchange so the sidebar shows a real title immediately instead
@@ -206,7 +212,10 @@ export async function POST(req: NextRequest) {
               // appear in the next message without waiting for chat
               // finalization. Always uses local FAST_MODEL so cloud users
               // don't pay extra per turn.
-              extractFactsLive(finalChatId).catch((err) =>
+              extractFactsLive(finalChatId, {
+                model: body.model,
+                providerId: body.providerId,
+              }).catch((err) =>
                 console.error("[chat] live fact extraction error:", err)
               );
 

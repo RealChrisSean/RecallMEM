@@ -350,11 +350,15 @@ async function setupCommand(opts = {}) {
   }
 
   // ─── Step 10: Write .env.local ─────────────────────────────────────────
+  // Note: we deliberately do NOT hardcode OLLAMA_FAST_MODEL anymore. Fact
+  // extraction now uses whichever model the user is actively chatting with
+  // (cloud or local), looked up from the chat row at runtime. Hardcoding
+  // gemma4:e4b here used to silently break extraction on machines that
+  // only pulled the 26B (or any other size).
   const finalEnv = {
     DATABASE_URL: env.DATABASE_URL || connectionString,
     OLLAMA_URL: env.OLLAMA_URL || "http://localhost:11434",
     OLLAMA_CHAT_MODEL: env.OLLAMA_CHAT_MODEL || "gemma4:26b",
-    OLLAMA_FAST_MODEL: env.OLLAMA_FAST_MODEL || "gemma4:e4b",
     OLLAMA_EMBED_MODEL: env.OLLAMA_EMBED_MODEL || "embeddinggemma",
   };
   writeEnv(ENV_PATH, finalEnv);

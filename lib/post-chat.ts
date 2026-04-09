@@ -28,11 +28,19 @@ export async function runPostChatPipeline(chatId: string): Promise<void> {
       }
     }
 
-    // 2. Extract facts + supersede stale ones (skip very short conversations)
+    // 2. Extract facts + supersede stale ones (skip very short conversations).
+    // Use whichever model + provider was last used for this chat so cloud
+    // users get extraction via their cloud provider and local users get
+    // free local extraction. Falls back to FAST_MODEL via Ollama if the
+    // chat row doesn't have a model recorded yet (older chats).
     if (chatRow.message_count >= 4 && chatRow.transcript.length >= 200) {
       try {
         const { facts, supersedes } = await extractFactsWithSupersession(
-          chatRow.transcript
+          chatRow.transcript,
+          {
+            model: chatRow.model || undefined,
+            providerId: chatRow.provider_id || undefined,
+          }
         );
         const retired = await markFactsSuperseded(supersedes, chatId);
         const inserted = facts.length > 0 ? await storeFacts(facts, chatId) : 0;
@@ -64,10 +72,15 @@ export async function runPostChatPipeline(chatId: string): Promise<void> {
 }
 
 // Per-message live extraction. Runs after every assistant reply as fire-and-
-// forget so facts surface in real time without waiting for the user to end the
-// chat. Always uses the local FAST_MODEL (Ollama) so cloud-provider users
-// don't get billed per turn for fact extraction.
-export async function extractFactsLive(chatId: string): Promise<void> {
+// forget so facts surface in real time without waiting for the user to end
+// the chat. Uses whichever LLM the user is currently chatting with (cloud
+// or local) so we don't fail silently when the hardcoded FAST_MODEL isn't
+// installed on a fresh machine. Local models = free; cloud providers =
+// small per-turn cost.
+export async function extractFactsLive(
+  chatId: string,
+  llmOpts: { model?: string; providerId?: string } = {}
+): Promise<void> {
   // Standalone trace - this runs fire-and-forget after the chat trace has
   // already finished, so we don't try to nest it under the parent.
   const langfuse = getLangfuse();
@@ -96,7 +109,8 @@ export async function extractFactsLive(chatId: string): Promise<void> {
       input: { transcriptLength: chatRow.transcript.length },
     });
     const { facts, supersedes } = await extractFactsWithSupersession(
-      chatRow.transcript
+      chatRow.transcript,
+      llmOpts
     );
     extractSpan?.end({ output: { facts, supersedes } });
 

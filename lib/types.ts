@@ -12,6 +12,11 @@ export interface ChatRow {
   is_pinned: boolean;
   created_at: Date;
   updated_at: Date;
+  // Set to whatever model + provider was last used for this chat. NULL
+  // means "use defaults". Read by the post-chat finalize pipeline so
+  // fact extraction uses the same LLM the user was actually chatting with.
+  model: string | null;
+  provider_id: string | null;
 }
 
 export interface UserFactRow {

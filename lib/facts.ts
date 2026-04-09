@@ -143,9 +143,18 @@ function isGarbage(fact: string): boolean {
   return GARBAGE_PATTERNS.some((p) => p.test(fact)) || fact.length < 10;
 }
 
+// Optional model + provider for extraction calls. Lets the caller use
+// the same LLM the user is actually chatting with (cloud or local)
+// instead of the hardcoded FAST_MODEL.
+export interface ExtractionLLMOptions {
+  model?: string;
+  providerId?: string;
+}
+
 // Extract facts from a conversation transcript using the LLM
 export async function extractFactsFromTranscript(
-  transcript: string
+  transcript: string,
+  llmOpts: ExtractionLLMOptions = {}
 ): Promise<string[]> {
   if (!transcript || transcript.length < 100) return [];
 
@@ -180,9 +189,14 @@ ${transcript}
 Return the JSON array now:`;
 
   try {
+    // Caller's choice wins. Falls back to FAST_MODEL via local Ollama
+    // only if neither model nor providerId was passed.
+    const llmCallOpts = llmOpts.providerId
+      ? { providerId: llmOpts.providerId }
+      : { model: llmOpts.model || FAST_MODEL };
     const response = await llmChat(
       [{ role: "user", content: prompt }],
-      { model: FAST_MODEL }
+      llmCallOpts
     );
     // Try to extract JSON array from the response
     const cleaned = response
@@ -210,7 +224,8 @@ Return the JSON array now:`;
 // arrives, the older "works at Acme" gets retired instead of sitting next
 // to it as if both were currently true.
 export async function extractFactsWithSupersession(
-  transcript: string
+  transcript: string,
+  llmOpts: ExtractionLLMOptions = {}
 ): Promise<{ facts: string[]; supersedes: string[] }> {
   if (!transcript || transcript.length < 100) return { facts: [], supersedes: [] };
 
@@ -256,9 +271,12 @@ ${transcript}
 Return the JSON object now:`;
 
   try {
+    const llmCallOpts = llmOpts.providerId
+      ? { providerId: llmOpts.providerId }
+      : { model: llmOpts.model || FAST_MODEL };
     const response = await llmChat(
       [{ role: "user", content: prompt }],
-      { model: FAST_MODEL }
+      llmCallOpts
     );
     const cleaned = response.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
     const match = cleaned.match(/\{[\s\S]*\}/);

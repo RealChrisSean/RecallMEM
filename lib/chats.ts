@@ -48,10 +48,14 @@ export async function createChat(mode: ModelMode = "standard"): Promise<string> 
   return row.id;
 }
 
-// Update a chat with the latest transcript and message count
+// Update a chat with the latest transcript and message count. Optionally
+// records which model + provider was used so the post-chat finalize
+// pipeline can extract facts using the same LLM the user was actually
+// chatting with.
 export async function updateChat(
   chatId: string,
-  messages: Message[]
+  messages: Message[],
+  opts: { model?: string | null; providerId?: string | null } = {}
 ): Promise<void> {
   const userId = await getUserId();
   const transcript = messagesToTranscript(messages);
@@ -59,9 +63,18 @@ export async function updateChat(
     `UPDATE s2m_chats
      SET transcript = $1,
          message_count = $2,
+         model = COALESCE($3, model),
+         provider_id = COALESCE($4::uuid, provider_id),
          updated_at = NOW()
-     WHERE id = $3 AND user_id = $4`,
-    [transcript, messages.length, chatId, userId]
+     WHERE id = $5 AND user_id = $6`,
+    [
+      transcript,
+      messages.length,
+      opts.model ?? null,
+      opts.providerId ?? null,
+      chatId,
+      userId,
+    ]
   );
 }
 
