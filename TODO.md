@@ -37,6 +37,9 @@ The features that I want next but didn't make v0.1.
 - [ ] **Rename chat title** by clicking it in the chat header
 - [ ] **Code syntax highlighting** in markdown messages (drop in `react-syntax-highlighter`)
 
+### Easier install
+- [ ] **Docker Compose for Postgres + Next.js** (Option A from the design discussion). One `docker compose up` removes the Postgres + pgvector install pain. Ollama still runs on host so Mac users keep Metal acceleration. Skip the all-in-one container approach because containerized Ollama on Mac loses GPU and drops generation from ~30 tok/s to ~5-8 tok/s, which defeats the entire local-LLM use case.
+
 ## v0.3 (later)
 
 ### Export / backup / migration

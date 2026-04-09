@@ -728,7 +728,7 @@ Apache License 2.0. See [LICENSE](./LICENSE) for the full text and [NOTICE](./NO
 
 This is v0.1. It works. I use it every day.
 
-It's also not "production ready" in the corporate sense. There's no test suite, no CI, no error monitoring, no SLA. If you want to use it as your daily AI tool, fork it, make it yours, and expect to read the code if something breaks. That's the deal.
+It's also not "production ready" in the corporate sense. There's no CI, no error monitoring, no SLA. There's a small Vitest test suite that covers the deterministic memory primitives (keyword routing, inflection, regression cases), but it's intentionally narrow. If you want to use it as your daily AI tool, fork it, make it yours, and expect to read the code if something breaks. That's the deal.
 
 I built RecallMEM because I wanted my own private AI. I'm sharing it because there's a real gap in the local AI ecosystem and someone needed to fill it. If this is useful to you, that's cool. If not, no hard feelings.
 
