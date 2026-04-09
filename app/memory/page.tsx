@@ -54,6 +54,19 @@ export default function MemoryPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [editCategory, setEditCategory] = useState<FactCategory>("other");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<FactCategory>>(
+    new Set()
+  );
+
+  function toggleCategory(cat: FactCategory) {
+    setCollapsedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  }
 
   const loadMemory = useCallback(async () => {
     try {
@@ -107,15 +120,6 @@ export default function MemoryPage() {
       loadMemory();
     } catch (err) {
       console.error("Failed to delete fact:", err);
-    }
-  }
-
-  async function rebuildProfile() {
-    try {
-      await fetch("/api/memory", { method: "POST" });
-      loadMemory();
-    } catch (err) {
-      console.error("Failed to rebuild profile:", err);
     }
   }
 
@@ -192,12 +196,17 @@ export default function MemoryPage() {
     );
   }
 
-  // Group facts by category
+  // Filter then group facts by category
+  const q = searchQuery.trim().toLowerCase();
+  const filteredFacts = q
+    ? data.facts.filter((f) => f.fact_text.toLowerCase().includes(q))
+    : data.facts;
   const factsByCategory = new Map<FactCategory, Fact[]>();
   for (const cat of FACT_CATEGORIES) factsByCategory.set(cat, []);
-  for (const fact of data.facts) {
+  for (const fact of filteredFacts) {
     const list = factsByCategory.get(fact.category) || [];
     list.push(fact);
+    factsByCategory.set(fact.category, list);
   }
 
   return (
@@ -223,20 +232,36 @@ export default function MemoryPage() {
             <span className="text-xs text-zinc-500 dark:text-zinc-400">
               {data.totalFacts} {data.totalFacts === 1 ? "fact" : "facts"}
             </span>
-            <button
-              onClick={wipeAllMemory}
-              className="text-xs px-3 py-1.5 rounded-md border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
-              title="Delete all facts, profile, and embeddings. Chats stay."
-            >
-              Wipe memory
-            </button>
-            <button
-              onClick={nukeEverything}
-              className="text-xs px-3 py-1.5 rounded-md border border-red-600 dark:border-red-700 bg-red-600 dark:bg-red-700 text-white hover:bg-red-700 dark:hover:bg-red-600 transition-colors"
-              title="Delete EVERYTHING including chats. Cannot be undone."
-            >
-              Nuke everything
-            </button>
+
+            {/* Wipe memory: keep chats, drop facts/profile/embeddings */}
+            <div className="group relative">
+              <button
+                onClick={wipeAllMemory}
+                className="text-xs px-3 py-1.5 rounded-md border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
+              >
+                Wipe memory
+              </button>
+              <span className="pointer-events-none absolute top-full right-0 mt-1.5 px-2.5 py-1.5 text-[10px] font-medium leading-snug rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-md z-50">
+                Deletes all facts, profile, and embeddings.
+                <br />
+                Your chats stay. Cannot be undone.
+              </span>
+            </div>
+
+            {/* Nuke everything: also wipes chats */}
+            <div className="group relative">
+              <button
+                onClick={nukeEverything}
+                className="text-xs px-3 py-1.5 rounded-md border border-red-600 dark:border-red-700 bg-red-600 dark:bg-red-700 text-white hover:bg-red-700 dark:hover:bg-red-600 transition-colors"
+              >
+                Nuke everything
+              </button>
+              <span className="pointer-events-none absolute top-full right-0 mt-1.5 px-2.5 py-1.5 text-[10px] font-medium leading-snug rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-md z-50">
+                Deletes EVERYTHING including chats, facts,
+                <br />
+                profile, and embeddings. Cannot be undone.
+              </span>
+            </div>
           </div>
         </div>
       </header>
@@ -244,17 +269,9 @@ export default function MemoryPage() {
       <div className="max-w-3xl mx-auto px-6 py-8 space-y-8">
         {/* Profile section */}
         <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">
-              Profile
-            </h2>
-            <button
-              onClick={rebuildProfile}
-              className="text-xs px-2 py-1 rounded border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 transition-colors"
-            >
-              Rebuild from facts
-            </button>
-          </div>
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider mb-3">
+            Profile
+          </h2>
           <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
             {data.profile ? (
               <pre className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap font-sans leading-relaxed">
@@ -276,9 +293,18 @@ export default function MemoryPage() {
 
         {/* Facts grouped by category */}
         <section>
-          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider mb-3">
-            All facts
-          </h2>
+          <div className="flex items-center justify-between mb-3 gap-3">
+            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">
+              All facts
+            </h2>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search facts..."
+              className="text-sm px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700 w-64"
+            />
+          </div>
           {data.facts.length === 0 ? (
             <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-8 text-center text-sm text-zinc-400 dark:text-zinc-500">
               No facts extracted yet. Have conversations and they will appear here.
@@ -288,11 +314,17 @@ export default function MemoryPage() {
               {FACT_CATEGORIES.map((cat) => {
                 const facts = factsByCategory.get(cat) || [];
                 if (facts.length === 0) return null;
+                const collapsed = collapsedCategories.has(cat);
                 return (
                   <div key={cat}>
-                    <h3 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                    <button
+                      onClick={() => toggleCategory(cat)}
+                      className="w-full flex items-center gap-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                    >
+                      <span className="inline-block w-3 text-center">{collapsed ? "▸" : "▾"}</span>
                       {CATEGORY_LABELS[cat]} ({facts.length})
-                    </h3>
+                    </button>
+                    {!collapsed && (
                     <div className="space-y-2">
                       {facts.map((fact) => (
                         <div
@@ -360,6 +392,7 @@ export default function MemoryPage() {
                         </div>
                       ))}
                     </div>
+                    )}
                   </div>
                 );
               })}

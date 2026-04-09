@@ -54,6 +54,7 @@ export interface ChatOptions {
   mode?: ModelMode;
   model?: string; // override the default model (for ollama path)
   providerId?: string; // if set, route through a custom provider
+  webSearch?: boolean; // enable native web search tool (anthropic/openai only)
 }
 
 interface ResolvedProvider {
@@ -98,11 +99,15 @@ export async function* chatStream(
   options: ChatOptions = {}
 ): AsyncGenerator<ChatStreamChunk> {
   const provider = await resolveProvider(options);
+  // Web search only works on cloud providers; Ollama silently ignores it
+  const webSearch = !!options.webSearch && provider.type !== "ollama";
   if (provider.type === "anthropic") {
-    yield* anthropicStream(provider, messages);
+    yield* anthropicStream(provider, messages, webSearch);
   } else if (provider.type === "ollama") {
     yield* ollamaStream(provider, messages);
   } else {
+    // OpenAI web search requires the Responses API or a search-enabled model;
+    // skipping for now so the toggle stays Anthropic-only.
     yield* openaiStream(provider, messages);
   }
 }
@@ -344,7 +349,8 @@ function anthropicHeaders(provider: ResolvedProvider): Record<string, string> {
 function anthropicBody(
   provider: ResolvedProvider,
   messages: ChatMessage[],
-  stream: boolean
+  stream: boolean,
+  webSearch = false
 ): string {
   // Anthropic puts system prompt outside the messages array
   const systemMessages = messages.filter((m) => m.role === "system");
@@ -356,18 +362,22 @@ function anthropicBody(
     system: systemContent || undefined,
     messages: chatMessages.map((m) => ({ role: m.role, content: m.content })),
     stream,
+    ...(webSearch && {
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
+    }),
   });
 }
 
 async function* anthropicStream(
   provider: ResolvedProvider,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
+  webSearch = false
 ): AsyncGenerator<ChatStreamChunk> {
   const url = `${provider.baseUrl.replace(/\/$/, "")}/v1/messages`;
   const res = await fetch(url, {
     method: "POST",
     headers: anthropicHeaders(provider),
-    body: anthropicBody(provider, messages, true),
+    body: anthropicBody(provider, messages, true, webSearch),
   });
   if (!res.ok || !res.body) {
     throw new Error(`Anthropic request failed: ${res.status} ${await res.text()}`);

@@ -8,6 +8,7 @@ import type { ModelMode, Message, AttachedFile } from "@/lib/types";
 import { MODEL_OPTIONS, type ModelId } from "@/lib/llm-config";
 import { AppFooter } from "@/components/AppFooter";
 import { Logo } from "@/components/Logo";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const MODEL_STORAGE_KEY = "recallmem_selected_model";
 const SIDEBAR_STORAGE_KEY = "recallmem_sidebar_open";
@@ -55,6 +56,7 @@ export default function ChatPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [webSearch, setWebSearch] = useState(false);
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const chatIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -78,6 +80,33 @@ export default function ChatPage() {
       }
     } catch (err) {
       console.error("Failed to fetch chats:", err);
+    }
+  }
+
+  // Poll the chat list waiting for a specific chat to get its title generated.
+  // Used after sending a message because title generation is fire-and-forget on
+  // the server and the frontend has no way to know exactly when it finishes.
+  // Polls every 700ms for up to 15 seconds.
+  async function pollForChatTitle(targetChatId: string) {
+    const POLL_INTERVAL = 700;
+    const TIMEOUT_MS = 15000;
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < TIMEOUT_MS) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+      try {
+        const res = await fetch("/api/chats");
+        if (!res.ok) continue;
+        const data = (await res.json()) as ChatListItem[];
+        setChatList(data);
+        const target = data.find((c) => c.id === targetChatId);
+        if (target?.title) {
+          // Title generated, stop polling
+          return;
+        }
+      } catch {
+        // Network blip, keep trying
+      }
     }
   }
 
@@ -192,6 +221,15 @@ export default function ChatPage() {
       localStorage.setItem(MODEL_STORAGE_KEY, `ollama:${selectedModel}`);
     }
   }, [selectedModel, selectedProviderId]);
+
+  // Load + persist web search toggle
+  useEffect(() => {
+    const saved = localStorage.getItem("recallmem.webSearch");
+    if (saved === "true") setWebSearch(true);
+  }, []);
+  useEffect(() => {
+    localStorage.setItem("recallmem.webSearch", webSearch ? "true" : "false");
+  }, [webSearch]);
 
   // Fetch custom providers
   async function refreshProviders() {
@@ -456,6 +494,7 @@ export default function ChatPage() {
           ...(selectedProviderId
             ? { providerId: selectedProviderId }
             : { model: selectedModel }),
+          webSearch,
         }),
       });
 
@@ -466,46 +505,87 @@ export default function ChatPage() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let assistantContent = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      // Smooth typewriter rendering. Incoming chunks go into a pending buffer
+      // and a requestAnimationFrame loop drains it into displayed content at
+      // a steady rate. Prevents jerky bursts when the stream delivers chunks
+      // unevenly (which it always does).
+      let pendingText = "";
+      let displayedText = "";
+      let streamFinished = false;
+      const CHARS_PER_FRAME = 3; // ~180 chars/sec at 60fps. Tune for taste.
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+      const drainTick = () => {
+        if (pendingText.length === 0) {
+          if (streamFinished) return; // we're done, stop the loop
+          // Wait for more data
+          requestAnimationFrame(drainTick);
+          return;
+        }
+        const charsToTake = Math.min(CHARS_PER_FRAME, pendingText.length);
+        displayedText += pendingText.slice(0, charsToTake);
+        pendingText = pendingText.slice(charsToTake);
+        const snapshot = displayedText;
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: snapshot,
+          };
+          return updated;
+        });
+        requestAnimationFrame(drainTick);
+      };
+      requestAnimationFrame(drainTick);
 
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6);
-          try {
-            const chunk = JSON.parse(data) as { delta?: string; done?: boolean; error?: string; chatId?: string };
-            if (chunk.chatId) {
-              setChatId(chunk.chatId);
-              continue;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const data = line.slice(6);
+            try {
+              const chunk = JSON.parse(data) as {
+                delta?: string;
+                done?: boolean;
+                error?: string;
+                chatId?: string;
+              };
+              if (chunk.chatId) {
+                setChatId(chunk.chatId);
+                continue;
+              }
+              if (chunk.error) {
+                pendingText += `Error: ${chunk.error}`;
+                continue;
+              }
+              if (chunk.delta) {
+                pendingText += chunk.delta;
+              }
+            } catch {
+              // skip malformed lines
             }
-            if (chunk.error) {
-              assistantContent = `Error: ${chunk.error}`;
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { role: "assistant", content: assistantContent };
-                return updated;
-              });
-              continue;
-            }
-            if (chunk.delta) {
-              assistantContent += chunk.delta;
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { role: "assistant", content: assistantContent };
-                return updated;
-              });
-            }
-          } catch {
-            // skip malformed lines
           }
         }
+      } finally {
+        // Mark stream finished and wait for the typewriter to drain
+        streamFinished = true;
+        await new Promise<void>((resolve) => {
+          const waitForDrain = () => {
+            if (pendingText.length === 0) {
+              resolve();
+            } else {
+              requestAnimationFrame(waitForDrain);
+            }
+          };
+          waitForDrain();
+        });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
@@ -517,6 +597,15 @@ export default function ChatPage() {
     } finally {
       setIsStreaming(false);
       refreshChatList();
+      // Poll for the title to appear (server generates it fire-and-forget after
+      // the response stream finishes). Stops as soon as the title is set or
+      // after a 15-second timeout.
+      const activeId = chatIdRef.current;
+      if (activeId) {
+        pollForChatTitle(activeId).catch(() => {
+          // Silent fail. The title will appear on the next manual refresh.
+        });
+      }
     }
   }
 
@@ -644,13 +733,14 @@ export default function ChatPage() {
               Memory
             </span>
           </Link>
+          <ThemeToggle />
           {/* Unrestricted mode hidden until vMLX + abliterated Gemma 4 is set up. See TODO.md */}
           <button
             onClick={newChat}
             disabled={isStreaming || isFinalizing || messages.length === 0}
             className="px-3 py-1.5 text-sm font-medium rounded-md border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-zinc-700 dark:text-zinc-300"
           >
-            New chat
+            New Chat
           </button>
         </div>
       </header>
@@ -705,6 +795,34 @@ export default function ChatPage() {
             >
               <PaperclipIcon />
             </button>
+            {(() => {
+              const sel = customProviders.find((p) => p.id === selectedProviderId);
+              const supportsWebSearch = sel?.type === "anthropic";
+              if (!supportsWebSearch) return null;
+              return (
+                <div className="absolute left-11 top-1/2 -translate-y-1/2 group">
+                  <button
+                    type="button"
+                    onClick={() => setWebSearch((v) => !v)}
+                    disabled={isStreaming}
+                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                      webSearch
+                        ? "bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400"
+                        : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    }`}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M2 12h20" />
+                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                    </svg>
+                  </button>
+                  <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 text-[10px] font-medium leading-snug rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-md z-50">
+                    {webSearch ? "Web search on - Claude can browse the web" : "Web search off - click to let Claude browse the web"}
+                  </span>
+                </div>
+              );
+            })()}
             <textarea
               ref={inputRef}
               value={input}
@@ -713,7 +831,9 @@ export default function ChatPage() {
               placeholder="Message RecallMEM..."
               rows={1}
               disabled={isStreaming}
-              className="w-full resize-none rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pl-12 pr-12 py-3 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700 disabled:opacity-50"
+              className={`w-full resize-none rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ${
+                customProviders.find((p) => p.id === selectedProviderId)?.type === "anthropic" ? "pl-20" : "pl-12"
+              } pr-12 py-3 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700 disabled:opacity-50`}
             />
             <button
               type="submit"
@@ -767,11 +887,53 @@ function Sidebar({
   isStreaming: boolean;
   isFinalizing: boolean;
 }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchMode, setSearchMode] = useState<"vector" | "text">("vector");
+  const [matchedIds, setMatchedIds] = useState<Set<string> | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+
+  // Load search mode preference
+  useEffect(() => {
+    const saved = localStorage.getItem("recallmem.searchMode");
+    if (saved === "text" || saved === "vector") setSearchMode(saved);
+  }, []);
+  useEffect(() => {
+    localStorage.setItem("recallmem.searchMode", searchMode);
+  }, [searchMode]);
+
+  // Debounced search: text mode is instant client-side, vector hits server
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q) {
+      setMatchedIds(null);
+      return;
+    }
+    // Both modes hit the server: text mode runs ILIKE against title +
+    // transcript, vector mode embeds the query and ranks chunks by cosine
+    // similarity. Debounced 300ms either way.
+    setIsSearching(true);
+    const handle = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/chats/search?mode=${searchMode}&q=${encodeURIComponent(q)}`);
+        if (res.ok) {
+          const json = (await res.json()) as { chatIds: string[] };
+          setMatchedIds(new Set(json.chatIds));
+        }
+      } catch (err) {
+        console.error("[sidebar] search failed:", err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchQuery, searchMode]);
+
   if (!open) return null;
 
-  // Split into pinned and unpinned, then group unpinned by date
-  const pinned = chats.filter((c) => c.is_pinned);
-  const unpinned = chats.filter((c) => !c.is_pinned);
+  // Apply search filter, then split into pinned and unpinned, then group by date
+  const filtered = matchedIds ? chats.filter((c) => matchedIds.has(c.id)) : chats;
+  const pinned = filtered.filter((c) => c.is_pinned);
+  const unpinned = filtered.filter((c) => !c.is_pinned);
   const dateGroups = groupChatsByDate(unpinned);
 
   return (
@@ -803,6 +965,45 @@ function Sidebar({
           <PlusIcon />
           New chat
         </button>
+      </div>
+
+      {/* Search */}
+      <div className="px-2 pb-2 space-y-1.5">
+        <div className="relative">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search..."
+            className="w-full text-sm px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700"
+          />
+          {isSearching && (
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse" />
+          )}
+        </div>
+        <div className="relative group flex items-center justify-between px-1 py-0.5">
+          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 group-hover:text-zinc-700 dark:group-hover:text-zinc-200">
+            Vector search
+          </span>
+          <button
+            type="button"
+            onClick={() => setSearchMode(searchMode === "vector" ? "text" : "vector")}
+            className={`relative inline-flex items-center w-9 h-5 rounded-full transition-colors flex-shrink-0 ${
+              searchMode === "vector" ? "bg-blue-600" : "bg-zinc-300 dark:bg-zinc-700"
+            }`}
+          >
+            <span
+              className={`inline-block w-4 h-4 rounded-full bg-white shadow transform transition-transform ${
+                searchMode === "vector" ? "translate-x-[18px]" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+          <span className="pointer-events-none absolute left-0 right-0 top-full mt-1.5 px-2.5 py-1.5 text-[10px] font-medium leading-snug rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 opacity-0 group-hover:opacity-100 transition-opacity shadow-md z-50">
+            {searchMode === "vector"
+              ? "ON: semantic search across full conversation content using embeddings. Finds chats by meaning, not just exact words. Needs Ollama running."
+              : "OFF: literal text matching across titles and full transcripts. Instant, works on any hardware, but only finds exact word matches."}
+          </span>
+        </div>
       </div>
 
       {/* Chat list */}
@@ -1106,7 +1307,7 @@ function MessageBubble({ message }: { message: Message }) {
           </div>
         )}
         {!message.content ? (
-          <span className="text-zinc-400 dark:text-zinc-600">...</span>
+          <TypingDots />
         ) : isUser ? (
           message.content
         ) : (
@@ -1122,6 +1323,27 @@ function MarkdownContent({ content }: { content: string }) {
     <div className="prose prose-sm prose-zinc dark:prose-invert max-w-none prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
+  );
+}
+
+// Animated typing indicator. Three dots that bounce in sequence.
+// Used while waiting for the first chunk of an assistant response.
+function TypingDots() {
+  return (
+    <span className="inline-flex items-center gap-1 py-1">
+      <span
+        className="w-1.5 h-1.5 rounded-full bg-zinc-400 dark:bg-zinc-500 animate-bounce"
+        style={{ animationDelay: "0ms", animationDuration: "1s" }}
+      />
+      <span
+        className="w-1.5 h-1.5 rounded-full bg-zinc-400 dark:bg-zinc-500 animate-bounce"
+        style={{ animationDelay: "150ms", animationDuration: "1s" }}
+      />
+      <span
+        className="w-1.5 h-1.5 rounded-full bg-zinc-400 dark:bg-zinc-500 animate-bounce"
+        style={{ animationDelay: "300ms", animationDuration: "1s" }}
+      />
+    </span>
   );
 }
 

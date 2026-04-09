@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { chatStream, type ModelMode, type ChatMessage } from "@/lib/llm";
 import { createChat, updateChat, getChat } from "@/lib/chats";
 import { buildMemoryAwareSystemPrompt } from "@/lib/memory";
+import { generateTitleIfMissing } from "@/lib/post-chat";
 import type { Message } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -14,6 +15,7 @@ export async function POST(req: NextRequest) {
       chatId?: string;
       model?: string;
       providerId?: string;
+      webSearch?: boolean;
     };
 
     if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
@@ -60,7 +62,7 @@ export async function POST(req: NextRequest) {
         );
 
         try {
-          for await (const chunk of chatStream(llmMessages, { mode, model: body.model, providerId: body.providerId })) {
+          for await (const chunk of chatStream(llmMessages, { mode, model: body.model, providerId: body.providerId, webSearch: body.webSearch })) {
             if (chunk.delta) {
               assistantContent += chunk.delta;
               const data = JSON.stringify({ delta: chunk.delta });
@@ -76,8 +78,21 @@ export async function POST(req: NextRequest) {
                 { role: "assistant", content: assistantContent },
               ];
               await updateChat(finalChatId, fullMessages);
-              // Memory persistence happens via /api/chat/finalize when the user
-              // ends the conversation (clicks New chat or closes the tab).
+
+              // Fire-and-forget: generate the chat title right after the first
+              // exchange so the sidebar shows a real title immediately instead
+              // of "Untitled". Skips if the chat already has a title.
+              // Uses the same provider as the chat (so cloud-only users without
+              // Ollama installed still get titles via Claude/GPT).
+              generateTitleIfMissing(finalChatId, {
+                providerId: body.providerId,
+              }).catch((err) =>
+                console.error("[chat] title generation error:", err)
+              );
+
+              // Full memory persistence (facts + profile + embeddings) still
+              // happens via /api/chat/finalize when the user ends the
+              // conversation (clicks New chat or closes the tab).
               return;
             }
           }

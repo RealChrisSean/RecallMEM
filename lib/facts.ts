@@ -20,7 +20,8 @@ export type FactCategory = (typeof FACT_CATEGORIES)[number];
 // Word-boundary keyword match (avoids "son" matching "Sonnet")
 export function matchesKeyword(text: string, keyword: string): boolean {
   if (keyword.includes(" ")) return text.toLowerCase().includes(keyword.toLowerCase());
-  const re = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+  // Prefix word match: \bwork matches work/worked/working but not framework
+  const re = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
   return re.test(text);
 }
 
@@ -315,6 +316,30 @@ export async function nukeEverything(): Promise<{
     factsDeleted: parseInt(beforeFacts?.count || "0", 10),
     chunksDeleted: parseInt(beforeChunks?.count || "0", 10),
   };
+}
+
+// Re-run categorize() on every active fact and update rows whose category
+// changed. Cheap (no LLM, no embeddings) — safe to call after every chat,
+// edit, or delete so categories stay correct as the categorizer improves.
+export async function recategorizeAllFacts(): Promise<number> {
+  const userId = await getUserId();
+  const rows = await query<{ id: string; fact_text: string; category: string }>(
+    `SELECT id, fact_text, category FROM s2m_user_facts
+     WHERE user_id = $1 AND is_active = TRUE`,
+    [userId]
+  );
+  let updated = 0;
+  for (const row of rows) {
+    const next = categorize(row.fact_text);
+    if (next !== row.category) {
+      await query(
+        `UPDATE s2m_user_facts SET category = $1 WHERE id = $2 AND user_id = $3`,
+        [next, row.id, userId]
+      );
+      updated++;
+    }
+  }
+  return updated;
 }
 
 // Update a fact's text and optionally re-categorize it

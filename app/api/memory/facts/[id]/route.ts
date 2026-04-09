@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { hardDeleteFact, updateFact, type FactCategory, FACT_CATEGORIES } from "@/lib/facts";
+import { hardDeleteFact, updateFact, recategorizeAllFacts, type FactCategory, FACT_CATEGORIES } from "@/lib/facts";
 import { rebuildProfile } from "@/lib/profile";
 
 export const runtime = "nodejs";
@@ -29,6 +29,7 @@ export async function PATCH(
         : undefined;
 
     await updateFact(id, body.fact_text.trim(), category);
+    await recategorizeAllFacts();
     await rebuildProfile();
 
     return new Response(JSON.stringify({ ok: true }), {
@@ -51,6 +52,7 @@ export async function DELETE(
   try {
     const { id } = await params;
     await hardDeleteFact(id);
+    await recategorizeAllFacts();
     await rebuildProfile();
     return new Response(JSON.stringify({ ok: true }), {
       headers: { "Content-Type": "application/json" },
