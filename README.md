@@ -29,7 +29,7 @@
 
 ## What is this
 
-A personal AI chatbot with REAL memory. Plug in any LLM you want and RecallMEM gives it persistent memory of who you are, what you've talked about, and what's currently true vs historical.
+A personal AI chatbot with REAL memory. Plug in any LLM you want and RecallMEM gives it persistent memory of who you are, what you've talked about, and what's currently true vs historical. All your memory is stored in a local Postgres database on your machine.
 
 The best part is that the LLM will never touch your memory in the database. Every retrieval is deterministic SQL + cosine similarity, assembled by TypeScript before the LLM ever sees it. The LLM only proposes new facts; a TypeScript validator decides what gets stored. Facts have timestamps and get auto-retired when you contradict them ("works at Acme" → "left Acme"). [Deep dive on the architecture →](./docs/ARCHITECTURE.md)
 
@@ -58,7 +58,7 @@ Two options. Pick whichever fits your priority.
 
 ### Option A: Cloud LLM (Claude or OpenAI) — fastest, ~5 minutes
 
-You need Node.js 20+ and [Homebrew](https://brew.sh). Then:
+You need Node.js 20+ and [Homebrew](https://brew.sh). The installer uses Homebrew to set up Postgres (where your memory lives) and Ollama (for local AI models). Then:
 
 ```bash
 npx recallmem
