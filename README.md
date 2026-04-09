@@ -6,51 +6,11 @@
 </p>
 
 <p align="center">
-  <strong>Persistent personal AI.</strong> Powered by Gemma 4 running locally on your own machine.
-  <br> <br>
-  This is not a chatbot (chatbots forget you) & this is not an agent (agents don't remember you). <br> <br> This IS a private AI, built on a deterministic memory framework where the LLM never touches your data.
+  <strong>Persistent Private AI.</strong> Powered by Gemma 4 running locally on your own machine.
 </p>
-
-## Table of Contents
 
 **Just want to install it?** Jump straight to [Quick start](#quick-start).
 
-- [Why I built this](#why-i-built-this)
-- [What it does](#what-it-does)
-- [How is this different?](#how-is-this-different) — comparison vs ChatGPT, Claude.ai, Mem0
-- [For developers (the memory framework)](#for-developers-the-memory-framework)
-- [**Quick start**](#quick-start) ← start here
-  - [Step 1: Node + Homebrew prereqs](#step-1-make-sure-you-have-node-and-homebrew)
-  - [Step 2: Run one command](#step-2-run-one-command)
-  - [Want a different model later?](#want-a-different-model-later)
-  - [Cloud-only (Claude / GPT, no local models)](#just-want-to-use-cloud-models-claude--gpt-and-skip-the-local-stuff)
-  - [Linux](#linux)
-  - [Windows](#windows)
-  - [**Troubleshooting**](#troubleshooting) ← if something breaks
-- [Architecture diagrams](#system-architecture)
-- [Choosing a model: local vs cloud](#fully-open-source-ollama--gemma-4-locally)
-- [Two install workflows: user vs developer](#workflow-1-just-run-it-most-users)
-- [Privacy](#privacy)
-  - [Truly unrecoverable deletion](#truly-unrecoverable-deletion)
-- [Manual setup (if auto-install doesn't work)](#setup)
-- [Contributing](#contributing)
-- [License](#license)
-- [Status](#status)
-
-
-<p align="center">
-  Two products in one repo:
-  <br>
-  <strong>👤 For users:</strong> install Node, Postgres, and Ollama (~10 minutes, see Quick Start below), then run <code>npx recallmem</code> to chat with an AI that actually remembers you.
-  <br>
-  <strong>👨‍💻 For developers:</strong> fork it and build your own AI app on top of the memory framework in <code>lib/</code>.
-</p>
-
-```bash
-npx recallmem
-```
-
-That's the install. One command. The CLI handles the rest. It clones the repo, sets up the database, pulls the local AI models, writes the config file, opens the chat in your browser. If you've already got Node, Postgres, and Ollama installed, you're chatting with your own private AI in about 5 minutes.
 
 <p align="center">
   <img src="./public/screenshots/demo.png" alt="RecallMEM chat UI showing the AI remembering the user's name across conversations" width="900">
