@@ -11,6 +11,33 @@
   This is not a chatbot (chatbots forget you) & this is not an agent (agents don't remember you). <br> <br> This IS a private AI, built on a deterministic memory framework where the LLM never touches your data.
 </p>
 
+## Table of Contents
+
+**Just want to install it?** Jump straight to [Quick start](#quick-start).
+
+- [Why I built this](#why-i-built-this)
+- [What it does](#what-it-does)
+- [How is this different?](#how-is-this-different) — comparison vs ChatGPT, Claude.ai, Mem0
+- [For developers (the memory framework)](#for-developers-the-memory-framework)
+- [**Quick start**](#quick-start) ← start here
+  - [Step 1: Node + Homebrew prereqs](#step-1-make-sure-you-have-node-and-homebrew)
+  - [Step 2: Run one command](#step-2-run-one-command)
+  - [Want a different model later?](#want-a-different-model-later)
+  - [Cloud-only (Claude / GPT, no local models)](#just-want-to-use-cloud-models-claude--gpt-and-skip-the-local-stuff)
+  - [Linux](#linux)
+  - [Windows](#windows)
+  - [**Troubleshooting**](#troubleshooting) ← if something breaks
+- [Architecture diagrams](#system-architecture)
+- [Choosing a model: local vs cloud](#fully-open-source-ollama--gemma-4-locally)
+- [Two install workflows: user vs developer](#workflow-1-just-run-it-most-users)
+- [Privacy](#privacy)
+  - [Truly unrecoverable deletion](#truly-unrecoverable-deletion)
+- [Manual setup (if auto-install doesn't work)](#setup)
+- [Contributing](#contributing)
+- [License](#license)
+- [Status](#status)
+
+
 <p align="center">
   Two products in one repo:
   <br>
