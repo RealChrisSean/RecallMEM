@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, FormEvent, DragEvent, ChangeEvent } from "react";
+import { useState, useRef, useEffect, useCallback, FormEvent, DragEvent, ChangeEvent } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -59,6 +59,29 @@ export default function ChatPage() {
   const [webSearch, setWebSearch] = useState(false);
   const [showWebSearchWarning, setShowWebSearchWarning] = useState(false);
   const [dontShowWebSearchWarning, setDontShowWebSearchWarning] = useState(false);
+  // Installed Ollama models. Used to detect when the user picks one from
+  // the dropdown that hasn't been pulled yet, so we can offer to download.
+  const [installedOllamaModels, setInstalledOllamaModels] = useState<Set<string>>(
+    new Set()
+  );
+  const [pendingDownloadModel, setPendingDownloadModel] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<{
+    status: string;
+    completed?: number;
+    total?: number;
+  } | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  // True when the user has no way to chat yet: no Gemma chat model
+  // installed AND no cloud provider configured. Drives the empty-state
+  // banner above the input and disables the message input until they
+  // pick one or the other. The empty state can flip back to enabled
+  // mid-session as they download a model or add a provider.
+  const hasGemmaInstalled = Array.from(installedOllamaModels).some((name) =>
+    name.startsWith("gemma4")
+  );
+  const hasCloudProvider = customProviders.some((p) => p.type !== "ollama");
+  const noChatBackend = !hasGemmaInstalled && !hasCloudProvider;
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const chatIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -232,6 +255,111 @@ export default function ChatPage() {
   useEffect(() => {
     localStorage.setItem("recallmem.webSearch", webSearch ? "true" : "false");
   }, [webSearch]);
+
+  // Load the list of installed Ollama models so we know which dropdown
+  // picks need a download.
+  const refreshInstalledModels = useCallback(async () => {
+    try {
+      const res = await fetch("/api/models/list");
+      if (!res.ok) return;
+      const data = (await res.json()) as { ok: boolean; models?: { name: string }[] };
+      if (data.ok && data.models) {
+        // Ollama returns names like "gemma4:26b" and sometimes "gemma4:26b-latest".
+        // Strip the trailing "-latest" if present so the comparison matches.
+        const names = new Set<string>();
+        for (const m of data.models) {
+          names.add(m.name);
+          if (m.name.endsWith(":latest")) {
+            names.add(m.name.replace(/:latest$/, ""));
+          }
+        }
+        setInstalledOllamaModels(names);
+      }
+    } catch (err) {
+      console.error("[models] list failed:", err);
+    }
+  }, []);
+  useEffect(() => {
+    refreshInstalledModels();
+  }, [refreshInstalledModels]);
+
+  // When the user picks an Ollama model from the dropdown, check if it's
+  // actually installed. If yes, just select it. If no, show the download
+  // modal so they can pull it without leaving the chat.
+  function handleOllamaSelect(id: ModelId) {
+    if (installedOllamaModels.has(id)) {
+      setSelectedModel(id);
+      setSelectedProviderId(null);
+    } else {
+      setPendingDownloadModel(id);
+      setDownloadProgress(null);
+      setDownloadError(null);
+    }
+  }
+
+  // Stream a model download from Ollama via our SSE proxy. Updates
+  // downloadProgress as bytes come in. On success, refresh the installed
+  // list and auto-select the model.
+  async function startModelDownload(model: string) {
+    setDownloadProgress({ status: "starting" });
+    setDownloadError(null);
+    try {
+      const res = await fetch("/api/models/pull", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model }),
+      });
+      if (!res.ok || !res.body) {
+        setDownloadError(`Server returned ${res.status}`);
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const data = trimmed.slice(5).trim();
+          if (!data) continue;
+          try {
+            const json = JSON.parse(data) as {
+              status?: string;
+              total?: number;
+              completed?: number;
+              error?: string;
+            };
+            if (json.error) {
+              setDownloadError(json.error);
+              return;
+            }
+            setDownloadProgress({
+              status: json.status || "downloading",
+              completed: json.completed,
+              total: json.total,
+            });
+            if (json.status === "success") {
+              await refreshInstalledModels();
+              setSelectedModel(model as ModelId);
+              setSelectedProviderId(null);
+              setPendingDownloadModel(null);
+              setDownloadProgress(null);
+              return;
+            }
+          } catch {
+            // skip malformed
+          }
+        }
+      }
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   // Fetch custom providers
   async function refreshProviders() {
@@ -703,10 +831,7 @@ export default function ChatPage() {
           <ModelPicker
             modelId={selectedModel}
             providerId={selectedProviderId}
-            onSelectOllama={(id) => {
-              setSelectedModel(id);
-              setSelectedProviderId(null);
-            }}
+            onSelectOllama={handleOllamaSelect}
             onSelectProvider={(id) => setSelectedProviderId(id)}
             customProviders={customProviders}
             disabled={isStreaming || isFinalizing}
@@ -762,6 +887,41 @@ export default function ChatPage() {
           )}
         </div>
       </div>
+
+      {/* Empty state banner: no Gemma installed AND no cloud provider configured */}
+      {noChatBackend && (
+        <div className="border-t border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 px-6 py-4">
+          <div className="max-w-3xl mx-auto">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center text-lg font-bold">
+                ⚡
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-semibold text-amber-900 dark:text-amber-100 mb-1">
+                  Get chatting in 30 seconds
+                </div>
+                <p className="text-xs text-amber-800 dark:text-amber-200 leading-relaxed mb-3">
+                  Pick how you want to use RecallMEM. You can do both later.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    href="/providers"
+                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 hover:bg-amber-700 text-white transition-colors"
+                  >
+                    Add a Claude or OpenAI key (~30 sec) →
+                  </Link>
+                  <Link
+                    href="/settings"
+                    className="px-3 py-1.5 text-xs font-medium rounded-md border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors"
+                  >
+                    Download Gemma 4 (private mode) →
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Input */}
       <div className="border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
@@ -860,9 +1020,9 @@ export default function ChatPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask me anything"
+              placeholder={noChatBackend ? "Set up a model first ↑" : "Ask me anything"}
               rows={1}
-              disabled={isStreaming}
+              disabled={isStreaming || noChatBackend}
               className={`w-full resize-none rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ${
                 (() => {
                   const sel = customProviders.find((p) => p.id === selectedProviderId);
@@ -873,7 +1033,7 @@ export default function ChatPage() {
             />
             <button
               type="submit"
-              disabled={(!input.trim() && attachedFiles.length === 0) || isStreaming}
+              disabled={(!input.trim() && attachedFiles.length === 0) || isStreaming || noChatBackend}
               className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
             >
               <ArrowUpIcon />
@@ -892,6 +1052,78 @@ export default function ChatPage() {
             <div className="text-zinc-700 dark:text-zinc-200 font-medium">Drop files to attach</div>
             <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
               Images, PDFs, text, code
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Model download modal - shown when user picks an unavailable Ollama model */}
+      {pendingDownloadModel && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full shadow-xl">
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
+              Download {MODEL_OPTIONS.find((m) => m.id === pendingDownloadModel)?.label || pendingDownloadModel}?
+            </h2>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4 leading-relaxed">
+              {MODEL_OPTIONS.find((m) => m.id === pendingDownloadModel)?.description}
+            </p>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-5">
+              <strong>
+                ~{MODEL_OPTIONS.find((m) => m.id === pendingDownloadModel)?.sizeGB} GB
+              </strong>{" "}
+              download. This can take a few minutes to half an hour depending on the size and your internet speed.
+            </p>
+
+            {downloadProgress && (
+              <div className="mb-5">
+                <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-1.5">
+                  {downloadProgress.status}
+                  {downloadProgress.completed && downloadProgress.total ? (
+                    <span>
+                      {" "}
+                      — {(downloadProgress.completed / 1e9).toFixed(2)} GB / {(downloadProgress.total / 1e9).toFixed(2)} GB
+                    </span>
+                  ) : null}
+                </div>
+                <div className="w-full h-2 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden">
+                  <div
+                    className="h-full bg-blue-600 transition-all duration-300"
+                    style={{
+                      width:
+                        downloadProgress.completed && downloadProgress.total
+                          ? `${Math.round((downloadProgress.completed / downloadProgress.total) * 100)}%`
+                          : "5%",
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {downloadError && (
+              <div className="mb-5 text-sm text-red-600 dark:text-red-400">
+                {downloadError}
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => {
+                  setPendingDownloadModel(null);
+                  setDownloadProgress(null);
+                  setDownloadError(null);
+                }}
+                disabled={!!downloadProgress && !downloadError}
+                className="px-4 py-2 text-sm font-medium rounded-md border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => startModelDownload(pendingDownloadModel)}
+                disabled={!!downloadProgress && !downloadError}
+                className="px-4 py-2 text-sm font-medium rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {downloadProgress && !downloadError ? "Downloading..." : "Download"}
+              </button>
             </div>
           </div>
         </div>

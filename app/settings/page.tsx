@@ -1,15 +1,126 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { AppFooter } from "@/components/AppFooter";
 import { Logo } from "@/components/Logo";
+import { MODEL_OPTIONS } from "@/lib/llm-config";
 
 export default function SettingsPage() {
   const [braveKey, setBraveKey] = useState("");
   const [braveConfigured, setBraveConfigured] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState<string | null>(null);
+
+  // Installed Ollama models for the model management section
+  const [installedModels, setInstalledModels] = useState<Set<string>>(new Set());
+  const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<{
+    status: string;
+    completed?: number;
+    total?: number;
+  } | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const refreshModels = useCallback(async () => {
+    try {
+      const res = await fetch("/api/models/list");
+      if (!res.ok) return;
+      const data = (await res.json()) as { ok: boolean; models?: { name: string }[] };
+      if (data.ok && data.models) {
+        const names = new Set<string>();
+        for (const m of data.models) {
+          names.add(m.name);
+          if (m.name.endsWith(":latest")) {
+            names.add(m.name.replace(/:latest$/, ""));
+          }
+        }
+        setInstalledModels(names);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshModels();
+  }, [refreshModels]);
+
+  async function pullModel(model: string) {
+    setDownloadingModel(model);
+    setDownloadProgress({ status: "starting" });
+    setDownloadError(null);
+    try {
+      const res = await fetch("/api/models/pull", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model }),
+      });
+      if (!res.ok || !res.body) {
+        setDownloadError(`Server returned ${res.status}`);
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const data = trimmed.slice(5).trim();
+          if (!data) continue;
+          try {
+            const json = JSON.parse(data) as {
+              status?: string;
+              total?: number;
+              completed?: number;
+              error?: string;
+            };
+            if (json.error) {
+              setDownloadError(json.error);
+              return;
+            }
+            setDownloadProgress({
+              status: json.status || "downloading",
+              completed: json.completed,
+              total: json.total,
+            });
+            if (json.status === "success") {
+              await refreshModels();
+              setDownloadingModel(null);
+              setDownloadProgress(null);
+              return;
+            }
+          } catch {
+            // skip malformed
+          }
+        }
+      }
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function deleteModel(model: string) {
+    if (!confirm(`Remove ${model} from your machine? This frees disk space immediately.`)) return;
+    try {
+      const res = await fetch("/api/models/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model }),
+      });
+      if (res.ok) {
+        await refreshModels();
+      }
+    } catch (err) {
+      console.error("Failed to delete model:", err);
+    }
+  }
 
   // Load whether a key is currently configured (we never read the actual value)
   useEffect(() => {
@@ -82,6 +193,26 @@ export default function SettingsPage() {
         {/* Three quick-link cards in a single row (stack on small screens) */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Link
+            href="/providers"
+            className="group flex flex-col rounded-xl border border-zinc-200 dark:border-zinc-800 bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950/30 dark:to-zinc-900 p-5 hover:border-emerald-300 dark:hover:border-emerald-800 hover:shadow-md transition-all"
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                <PlugIcon />
+              </div>
+              <span className="text-sm font-semibold uppercase tracking-wider text-zinc-900 dark:text-zinc-100">
+                Providers
+              </span>
+            </div>
+            <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed flex-1">
+              Add a Claude or OpenAI API key. Fastest way to get chatting.
+            </p>
+            <div className="text-xs font-medium text-emerald-700 dark:text-emerald-400 mt-4 group-hover:translate-x-0.5 transition-transform">
+              Manage →
+            </div>
+          </Link>
+
+          <Link
             href="/memory"
             className="group flex flex-col rounded-xl border border-zinc-200 dark:border-zinc-800 bg-gradient-to-br from-violet-50 to-white dark:from-violet-950/30 dark:to-zinc-900 p-5 hover:border-violet-300 dark:hover:border-violet-800 hover:shadow-md transition-all"
           >
@@ -120,27 +251,104 @@ export default function SettingsPage() {
               Edit →
             </div>
           </Link>
-
-          <Link
-            href="/providers"
-            className="group flex flex-col rounded-xl border border-zinc-200 dark:border-zinc-800 bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950/30 dark:to-zinc-900 p-5 hover:border-emerald-300 dark:hover:border-emerald-800 hover:shadow-md transition-all"
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                <PlugIcon />
-              </div>
-              <span className="text-sm font-semibold uppercase tracking-wider text-zinc-900 dark:text-zinc-100">
-                Providers
-              </span>
-            </div>
-            <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed flex-1">
-              Add API keys for Anthropic, OpenAI, or OpenAI-compatible providers.
-            </p>
-            <div className="text-xs font-medium text-emerald-700 dark:text-emerald-400 mt-4 group-hover:translate-x-0.5 transition-transform">
-              Manage →
-            </div>
-          </Link>
         </div>
+
+        <section>
+          <h2 className="flex items-center justify-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider mb-3">
+            <ModelsIcon />
+            Manage models
+          </h2>
+          <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4 leading-relaxed">
+              Download or remove Gemma 4 chat models without leaving the app. The model you pick from the dropdown in chat needs to be installed here first.
+            </p>
+
+            <div className="space-y-3">
+              {MODEL_OPTIONS.map((opt) => {
+                const isInstalled = installedModels.has(opt.id);
+                const isCurrentDownload = downloadingModel === opt.id;
+                return (
+                  <div
+                    key={opt.id}
+                    className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                            {opt.label}
+                          </span>
+                          {opt.recommended && (
+                            <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                              ★ Recommended
+                            </span>
+                          )}
+                          {isInstalled && (
+                            <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                              ✓ Installed
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                          ~{opt.sizeGB} GB • {opt.description}
+                        </div>
+                      </div>
+                      <div className="flex-shrink-0">
+                        {isInstalled ? (
+                          <button
+                            onClick={() => deleteModel(opt.id)}
+                            className="px-3 py-1.5 text-xs font-medium rounded-md border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
+                          >
+                            Remove
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => pullModel(opt.id)}
+                            disabled={!!downloadingModel}
+                            className="px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {isCurrentDownload && downloadProgress
+                              ? "Downloading..."
+                              : "Download"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {isCurrentDownload && downloadProgress && (
+                      <div className="mt-3">
+                        <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mb-1">
+                          {downloadProgress.status}
+                          {downloadProgress.completed && downloadProgress.total ? (
+                            <span>
+                              {" "}
+                              — {(downloadProgress.completed / 1e9).toFixed(2)} GB / {(downloadProgress.total / 1e9).toFixed(2)} GB
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="w-full h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden">
+                          <div
+                            className="h-full bg-blue-600 transition-all duration-300"
+                            style={{
+                              width:
+                                downloadProgress.completed && downloadProgress.total
+                                  ? `${Math.round((downloadProgress.completed / downloadProgress.total) * 100)}%`
+                                  : "5%",
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {isCurrentDownload && downloadError && (
+                      <div className="mt-2 text-xs text-red-600 dark:text-red-400">
+                        {downloadError}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
 
         <section>
           <h2 className="flex items-center justify-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider mb-3">
@@ -266,6 +474,16 @@ function GlobeIcon() {
       <circle cx="12" cy="12" r="10" />
       <path d="M2 12h20" />
       <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  );
+}
+
+function ModelsIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+      <line x1="12" y1="22.08" x2="12" y2="12" />
     </svg>
   );
 }

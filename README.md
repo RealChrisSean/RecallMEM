@@ -6,7 +6,15 @@
 </p>
 
 <p align="center">
-  <strong>Persistent Private AI.</strong> Powered by Gemma 4 running locally on your own machine.
+  <strong>Persistent personal AI that actually remembers you.</strong>
+</p>
+
+<p align="center">
+  LLMs like ChatGPT, Claude.ai, and Gemini tend to forget you the moment you end your session. RecallMEM doesn't. It builds a profile of who you are, extracts facts after every conversation, and runs vector search across your entire history to find relevant context. By the time you've used it for a week, it knows you better than any AI ever will.
+</p>
+
+<p align="center">
+  Use it with Claude or OpenAI for fast responses and the best models (~5 minute setup). Or run everything locally with Gemma 4 for 100% privacy. You'll get the same memory framework either way. Your call.
 </p>
 
 <p align="center">
@@ -21,11 +29,15 @@
 
 ## What is this
 
-A personal AI chat app with real memory that runs 100% on your machine. Your conversations stay local. The AI builds a profile of who you are over time, extracts facts after every chat, and vector-searches across your entire history to find relevant context. By the time you've used it for a week, it knows you better than any cloud AI because it never forgets.
+A personal AI chatbot with REAL memory. Plug in any LLM you want and RecallMEM gives it persistent memory of who you are, what you've talked about, and what's currently true vs historical.
 
-The default model is **Gemma 4** (Apache 2.0) running locally via Ollama. Pick any size from E2B (runs on a phone) up to 31B Dense (best quality, needs a workstation). Or skip Ollama entirely and bring your own API key for Claude, GPT, Groq, Together, OpenRouter, or anything OpenAI-compatible.
+The best part is that the LLM will never touch your memory in the database. Every retrieval is deterministic SQL + cosine similarity, assembled by TypeScript before the LLM ever sees it. The LLM only proposes new facts; a TypeScript validator decides what gets stored. Facts have timestamps and get auto-retired when you contradict them ("works at Acme" → "left Acme"). [Deep dive on the architecture →](./docs/ARCHITECTURE.md)
 
-The memory is the actual differentiator. Not the model. Not the UI. Memory reads are deterministic SQL + cosine similarity, not LLM tool calls. The chat model never touches your database. Facts are proposed by a local LLM but validated by TypeScript before storage. [Deep dive on the architecture →](./docs/ARCHITECTURE.md)
+You can run it three ways:
+
+- **Cloud LLMs (recommended for most people).** Add a Claude or OpenAI API key in Settings. Fast, smart, works on any computer. Your memory still stays local in your own Postgres database. Only the chat messages go to the provider.
+- **Local LLMs (recommended for privacy).** Run Gemma 4 via Ollama. Nothing leaves your machine, ever. Slower setup (~18 GB model download) and slower responses, but truly air-gappable.
+- **Both.** Use cloud for daily chat, switch to local for the sensitive stuff. The model dropdown lets you pick per-conversation.
 
 ## Features
 
@@ -42,30 +54,35 @@ The memory is the actual differentiator. Not the model. Not the UI. Memory reads
 
 ## Quick start (Mac)
 
-RecallMEM is built and tested on macOS. Mac is the supported platform.
+Two options. Pick whichever fits your priority.
 
-**Prerequisites:** Node.js 20+ and [Homebrew](https://brew.sh).
+### Option A: Cloud LLM (Claude or OpenAI) — fastest, ~5 minutes
+
+You need Node.js 20+ and [Homebrew](https://brew.sh). Then:
 
 ```bash
 npx recallmem
 ```
 
-That's the whole install. The CLI checks what you have, shows what's missing, asks one yes/no question, then installs Postgres, pgvector, Ollama, and your choice of Gemma 4 model. First run takes 5-45 minutes depending on model size and internet speed. Subsequent runs are instant.
+The installer sets up Postgres, pgvector, and Ollama (for the embedding model that powers memory). When the browser opens to `localhost:3000`:
 
-<details>
-<summary><strong>Just want cloud models? (Claude / GPT)</strong></summary>
+1. Click **Settings** in the top right
+2. Click **Providers**
+3. Add your Claude or OpenAI API key
+4. Pick that model from the dropdown in the chat header
+5. Start chatting
 
-You still need Postgres for local memory storage, but you can skip Ollama entirely:
+**Total time: ~5 minutes.** The AI remembers everything across every chat. Your memory stays in your local Postgres database. Only the chat messages go to the cloud provider.
 
-```bash
-brew install postgresql@17 pgvector
-brew services start postgresql@17
-npx recallmem
-```
+### Option B: Local Gemma 4 — 100% private, ~15-45 minutes
 
-After the app starts, go to **Settings → Providers → Add a new provider**, paste your API key, and pick that model from the chat dropdown.
+Same `npx recallmem` command. When the app opens, click **Settings → Manage models** and download one of these:
 
-</details>
+- **Gemma 4 E4B** (4 GB, ~5 minute download) — fastest to test
+- **Gemma 4 26B** (18 GB, ~20-30 minute download) — recommended for daily use
+- **Gemma 4 31B** (19 GB, slower, best quality)
+
+Then pick that model from the dropdown and chat. Nothing leaves your machine.
 
 <details>
 <summary><strong>Linux (not officially supported, manual install)</strong></summary>
@@ -156,6 +173,10 @@ Apache 2.0. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE). Use it, modify it, 
 
 ## Status
 
-v0.1. It works. I use it every day. There's no CI, no error monitoring, no SLA. If you want to use it as your daily AI tool, fork it, make it yours, and expect to read the code if something breaks. That's the deal.
+v0.1.2. It works. I use it every day.
+
+I built RecallMEM because I wanted an AI that actually knows me. Not because I'm paranoid about privacy (though that's a nice bonus). The chat models you use today forget you the second you close the tab and that drives me crazy. So I fixed it.
+
+There's no CI, no error monitoring, no SLA. If you want to use it as your daily AI tool, fork it, make it yours, and expect to read the code if something breaks. That's the deal. If this is useful to you, that's cool. If not, no hard feelings.
 
 [github.com/RealChrisSean/RecallMEM](https://github.com/RealChrisSean/RecallMEM)

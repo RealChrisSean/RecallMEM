@@ -95,35 +95,11 @@ async function waitFor(checkFn, timeoutMs = 15000, intervalMs = 500) {
   return false;
 }
 
-// Pretty model menu — short lines, plain words, dyslexia-friendly.
-async function pickGemmaModel() {
-  blank();
-  console.log(color.bold("Pick a Gemma 4 model."));
-  blank();
-  console.log("  1) Gemma 4 26B");
-  console.log("     Size: 18 GB");
-  console.log("     Speed: Fast");
-  console.log("     Best for: Most people. Recommended.");
-  blank();
-  console.log("  2) Gemma 4 31B");
-  console.log("     Size: 19 GB");
-  console.log("     Speed: Slower");
-  console.log("     Best for: People who want the smartest answers, even if it takes longer.");
-  blank();
-  console.log("  3) Gemma 4 E2B");
-  console.log("     Size: 2 GB");
-  console.log("     Speed: Very fast");
-  console.log("     Best for: A quick test. Or older laptops.");
-  blank();
-
-  while (true) {
-    const answer = await ask("Type 1, 2, or 3 and press Enter [1]: ");
-    if (!answer || answer === "1") return { id: "gemma4:26b", label: "Gemma 4 26B" };
-    if (answer === "2") return { id: "gemma4:31b", label: "Gemma 4 31B" };
-    if (answer === "3") return { id: "gemma4:e2b", label: "Gemma 4 E2B" };
-    console.log("  Type 1, 2, or 3.");
-  }
-}
+// Model selection moved to the web UI. Setup only installs the embedder
+// (small, required for memory) and lets the user pick a chat model from
+// the Settings page in the running app. This dramatically shortens the
+// install time and gives users a real visual progress bar instead of
+// terminal output for the multi-GB chat model download.
 
 async function setupCommand(opts = {}) {
   const {
@@ -363,20 +339,12 @@ async function setupCommand(opts = {}) {
     const hasE2 = await detectOllamaModel("gemma4:e2b");
     const hasAny = has26.installed || has31.installed || hasE2.installed;
 
-    // Always show the picker when no Gemma chat model is installed.
-    // skipIfDone is intentionally NOT checked here - on a fresh machine
-    // we MUST pull a model or the chat 404s on first message.
-    if (!hasAny) {
-      const choice = await pickGemmaModel();
-      step(`Downloading ${choice.label}... (this can take a while)`);
-      try {
-        execSync(`ollama pull ${choice.id}`, { stdio: "inherit" });
-        success(`${choice.label} installed`);
-      } catch (err) {
-        fail(`Failed to pull ${choice.id}: ${err.message}`);
-        info(`You can pull it later with: ollama pull ${choice.id}`);
-      }
-    } else if (hasAny) {
+    // Skip the Gemma chat model download in the installer entirely.
+    // Users pick + download a model from the running web app (Settings →
+    // Manage models) where there's a real progress bar. The chat UI
+    // detects this state and shows an empty-state banner asking the user
+    // to either download a model or add a cloud provider before chatting.
+    if (hasAny) {
       success("A Gemma 4 chat model is already installed");
     }
   }
@@ -419,12 +387,17 @@ async function setupCommand(opts = {}) {
   blank();
   success(color.bold("Setup complete!"));
   blank();
-  console.log("Want a different Gemma 4 model later? Run one of these:");
-  console.log("  ollama pull gemma4:26b");
-  console.log("  ollama pull gemma4:31b");
-  console.log("  ollama pull gemma4:e2b");
+  console.log("One more thing before you can chat:");
   console.log("");
-  console.log("Then pick it from the dropdown at the top of the chat.");
+  console.log("  You need either a cloud API key OR a local Gemma 4 model.");
+  console.log("");
+  console.log("  When the app opens, click " + color.bold("Settings") + " in the top right.");
+  console.log("  Then pick ONE of these:");
+  console.log("");
+  console.log("    A) " + color.bold("Providers") + " — add a Claude or OpenAI API key (~30 sec, fastest)");
+  console.log("    B) " + color.bold("Manage models") + " — download Gemma 4 E4B for 100% local mode");
+  console.log("");
+  console.log("  Either one works. You can do both later.");
   blank();
 
   return { ok: true };
