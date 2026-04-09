@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <strong>Persistent personal AI that actually remembers you.</strong>
+  <strong>Your Persistent Private AI that actually remembers you.</strong>
 </p>
 
 <p align="center">
