@@ -249,11 +249,39 @@ The memory framework doesn't care which LLM you use. It just assembles context. 
 
 ## Quick start
 
+You need these on your machine before `npx recallmem` will fully work. Be honest with yourself about this part: a "local AI chatbot" needs a local LLM, and a local LLM is several gigabytes. There is no install method anywhere that gets around that download. Doing the prereqs first takes ~10 minutes the first time and then you never touch them again.
+
+**Mac (Homebrew):**
+
 ```bash
+# 1. Node 20+ (needed for npx)
+brew install node
+
+# 2. Postgres 17 with pgvector
+brew install postgresql@17 pgvector
+brew services start postgresql@17
+
+# 3. Ollama (the local LLM runtime)
+brew install ollama
+brew services start ollama        # IMPORTANT: this starts Ollama in the background.
+                                   # Without it, the chat will fail with "fetch failed".
+
+# 4. Pull at least one Gemma model so the chat actually has a brain to talk to
+ollama pull gemma4:e4b            # ~4GB, fast, works on most laptops, good first test
+ollama pull embeddinggemma        # ~600MB, REQUIRED for memory vector search
+ollama pull gemma4:26b            # ~18GB, recommended for quality. Pull this in the background.
+
+# 5. Now run RecallMEM
 npx recallmem
 ```
 
-You need three things on your machine first: **Node.js 20+**, **Postgres 17 with pgvector**, and **Ollama** (optional, skip if you only want cloud providers). If any are missing, the CLI tells you exactly what to install for your OS.
+**Linux:** same steps but use `apt`/`dnf` for Node and Postgres, and `curl -fsSL https://ollama.com/install.sh | sh` for Ollama. Then `systemctl start ollama`.
+
+**Windows:** WSL2 + the Linux steps above. Native Windows is not currently supported.
+
+**If you get "fetch failed" when sending a message:** Ollama isn't running. Run `brew services start ollama` (Mac) or `systemctl start ollama` (Linux) and try again.
+
+**Just want to use cloud models (Claude/GPT) and skip the local stuff?** You still need Node + Postgres, but you can skip Ollama and the model pulls. Run `npx recallmem`, then go to Settings → Providers → Add a new provider with your API key. Pick it from the model dropdown in chat.
 
 <details>
 <summary><strong>Architecture diagrams (system, memory layers, post-chat sequence)</strong></summary>
