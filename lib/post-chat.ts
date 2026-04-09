@@ -1,7 +1,6 @@
 import { chat as llmChat, FAST_MODEL } from "@/lib/llm";
 import { setChatTitle, getChat } from "@/lib/chats";
 import {
-  extractFactsFromTranscript,
   extractFactsWithSupersession,
   markFactsSuperseded,
   storeFacts,
@@ -9,6 +8,7 @@ import {
 } from "@/lib/facts";
 import { rebuildProfile } from "@/lib/profile";
 import { embedAndStoreChunks } from "@/lib/chunks";
+import { getLangfuse } from "@/lib/langfuse";
 
 // Run after a chat exchange completes. Generates title (if missing), extracts facts,
 // re-synthesizes profile, and embeds transcript chunks for vector search.
@@ -68,19 +68,38 @@ export async function runPostChatPipeline(chatId: string): Promise<void> {
 // chat. Always uses the local FAST_MODEL (Ollama) so cloud-provider users
 // don't get billed per turn for fact extraction.
 export async function extractFactsLive(chatId: string): Promise<void> {
+  // Standalone trace - this runs fire-and-forget after the chat trace has
+  // already finished, so we don't try to nest it under the parent.
+  const langfuse = getLangfuse();
+  const trace = langfuse?.trace({
+    name: "live-fact-extraction",
+    metadata: { chatId },
+  });
   try {
     const chatRow = await getChat(chatId);
-    if (!chatRow || !chatRow.transcript) return;
+    if (!chatRow || !chatRow.transcript) {
+      trace?.update({ output: { skipped: "no transcript" } });
+      return;
+    }
     // Same quality bar as the batch pipeline so we don't extract from a
     // single greeting.
-    if (chatRow.message_count < 2 || chatRow.transcript.length < 100) return;
+    if (chatRow.message_count < 2 || chatRow.transcript.length < 100) {
+      trace?.update({ output: { skipped: "below quality bar" } });
+      return;
+    }
 
     // Combined extract + supersede in one LLM call. Retires stale facts
     // ("works at TiDB" once "got laid off from TiDB" is said) so the
     // active set always reflects current truth.
+    const extractSpan = trace?.span({
+      name: "extract-and-supersede",
+      input: { transcriptLength: chatRow.transcript.length },
+    });
     const { facts, supersedes } = await extractFactsWithSupersession(
       chatRow.transcript
     );
+    extractSpan?.end({ output: { facts, supersedes } });
+
     const retired = await markFactsSuperseded(supersedes, chatId);
     const inserted = facts.length > 0 ? await storeFacts(facts, chatId) : 0;
     console.log(
@@ -91,8 +110,19 @@ export async function extractFactsLive(chatId: string): Promise<void> {
       if (moved > 0) console.log(`[live-facts] recategorized ${moved}`);
       await rebuildProfile();
     }
+    trace?.update({
+      output: { factsExtracted: facts.length, inserted, retired },
+    });
   } catch (err) {
+    trace?.update({
+      output: { error: err instanceof Error ? err.message : String(err) },
+    });
     console.error("[live-facts] failed:", err);
+  } finally {
+    // Flush so the trace shows up immediately even though this is fire-
+    // and-forget. Without this, the request handler returns before the
+    // SDK has a chance to send.
+    await langfuse?.flushAsync().catch(() => {});
   }
 }
 

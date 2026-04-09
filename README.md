@@ -446,6 +446,33 @@ Same `npx recallmem` command. Different behavior because the CLI is smart about 
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for the dev workflow.
 
+**Testing:**
+
+```bash
+npm test          # run the suite once
+npm test:watch    # re-run on file change
+```
+
+The test suite uses Vitest and currently covers the deterministic memory primitives (keyword inflection, the categorization router, and the regression cases that have bitten us in the past — `son` matching `Sonnet`, `work` matching `framework`, etc). It's intentionally narrow and fast (~150ms). New tests go in `test/unit/` and follow the same shape as `test/unit/facts.test.ts`. No DB or LLM required, pure functions only.
+
+**Optional observability (Langfuse):**
+
+If you're hacking on RecallMEM and want full trace timelines for every chat turn (memory build, LLM generation, fact extraction, supersession decisions, etc), there's a built-in Langfuse integration. It's a peer dependency, so it's NOT installed by default and zero cost when unused.
+
+```bash
+npm install langfuse
+```
+
+Then set these in `.env.local`:
+
+```
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASEURL=http://localhost:3000  # optional, defaults to cloud.langfuse.com
+```
+
+Self-host Langfuse via Docker so traces stay on your machine. This is a developer-only debugging tool. Trace payloads include the actual user message content, so don't enable it on machines where conversation contents shouldn't leave the local environment.
+
 </details>
 
 <details>

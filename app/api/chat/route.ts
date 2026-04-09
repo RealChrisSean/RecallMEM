@@ -3,6 +3,7 @@ import { chatStream, type ModelMode, type ChatMessage } from "@/lib/llm";
 import { createChat, updateChat, getChat } from "@/lib/chats";
 import { buildMemoryAwareSystemPrompt } from "@/lib/memory";
 import { generateTitleIfMissing, extractFactsLive } from "@/lib/post-chat";
+import { getLangfuse } from "@/lib/langfuse";
 import type { Message } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -27,6 +28,22 @@ export async function POST(req: NextRequest) {
 
     const mode: ModelMode = body.mode || "standard";
 
+    // Open a Langfuse trace for this turn (no-op if env vars unset).
+    // Spans for memory build, llm generation, fact extraction etc all
+    // hang off this trace so the whole pipeline shows up in one timeline.
+    const langfuse = getLangfuse();
+    const trace = langfuse?.trace({
+      name: "chat-turn",
+      input: { lastUserMessage: body.messages[body.messages.length - 1]?.content },
+      metadata: {
+        mode,
+        providerId: body.providerId || null,
+        model: body.model || null,
+        webSearch: !!body.webSearch,
+        messageCount: body.messages.length,
+      },
+    });
+
     // Get or create chat row. Track the chat's last-updated timestamp so we
     // can detect "this is a resumed chat from days ago" and inject a gap
     // marker into the conversation.
@@ -46,10 +63,17 @@ export async function POST(req: NextRequest) {
 
     // Build memory-aware system prompt using the latest user message for vector search
     const latestUserMessage = body.messages[body.messages.length - 1];
+    const memorySpan = trace?.span({
+      name: "build-memory-prompt",
+      input: { query: latestUserMessage.content, chatId },
+    });
     const systemPromptText = await buildMemoryAwareSystemPrompt(
       latestUserMessage.content,
       chatId
     );
+    memorySpan?.end({
+      output: { promptLength: systemPromptText.length },
+    });
 
     // Detect a resumed chat: if the chat was last touched more than 2 hours
     // ago and there are existing messages, inject a single system marker
@@ -97,6 +121,16 @@ export async function POST(req: NextRequest) {
           encoder.encode(`data: ${JSON.stringify({ chatId: finalChatId })}\n\n`)
         );
 
+        const generation = trace?.generation({
+          name: "chat-llm",
+          input: llmMessages,
+          model: body.model || "(provider default)",
+          metadata: {
+            providerId: body.providerId || null,
+            webSearch: !!body.webSearch,
+          },
+        });
+
         try {
           for await (const chunk of chatStream(llmMessages, { mode, model: body.model, providerId: body.providerId, webSearch: body.webSearch })) {
             if (chunk.delta) {
@@ -107,6 +141,11 @@ export async function POST(req: NextRequest) {
             if (chunk.done) {
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
               controller.close();
+
+              generation?.end({
+                output: assistantContent,
+              });
+              trace?.update({ output: assistantContent });
 
               // Save updated chat with the new assistant message
               const fullMessages: Message[] = [
@@ -143,6 +182,10 @@ export async function POST(req: NextRequest) {
           }
           controller.close();
         } catch (err) {
+          generation?.end({
+            level: "ERROR",
+            statusMessage: err instanceof Error ? err.message : String(err),
+          });
           const message = err instanceof Error ? err.message : String(err);
           const errChunk = JSON.stringify({ error: message, done: true });
           controller.enqueue(encoder.encode(`data: ${errChunk}\n\n`));

@@ -17,12 +17,57 @@ export const FACT_CATEGORIES = [
 
 export type FactCategory = (typeof FACT_CATEGORIES)[number];
 
-// Word-boundary keyword match (avoids "son" matching "Sonnet")
+// Word-boundary keyword match. For single-word keywords we ALSO check
+// inflected forms (work/works/worked/working) so past-tense and progressive
+// don't get missed, while still avoiding cross-word false positives like
+// "son" matching "Sonnet" or "mom" matching "moment".
 export function matchesKeyword(text: string, keyword: string): boolean {
-  if (keyword.includes(" ")) return text.toLowerCase().includes(keyword.toLowerCase());
-  // Prefix word match: \bwork matches work/worked/working but not framework
-  const re = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
-  return re.test(text);
+  if (keyword.includes(" ")) {
+    return text.toLowerCase().includes(keyword.toLowerCase());
+  }
+  for (const variant of inflect(keyword)) {
+    const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`\\b${escaped}\\b`, "i").test(text)) return true;
+  }
+  return false;
+}
+
+// Generate basic English inflections for a single-word keyword. Handles the
+// 90% of cases (work → worked/working/works) without a real stemmer. Skips
+// keywords that are already inflected or non-verb-like (e.g. "anniversary").
+function inflect(base: string): string[] {
+  const variants = new Set<string>([base]);
+  // Don't bother inflecting very short words (would be noise) or words
+  // already ending in common inflections.
+  if (base.length < 3) return [base];
+  if (/(ed|ing|ly)$/.test(base)) return [base];
+
+  // Plural / 3rd person singular
+  if (/[sxz]$|[cs]h$/.test(base)) {
+    variants.add(base + "es");
+  } else if (/[^aeiou]y$/.test(base)) {
+    variants.add(base.slice(0, -1) + "ies");
+  } else {
+    variants.add(base + "s");
+  }
+
+  // Past tense
+  if (base.endsWith("e")) {
+    variants.add(base + "d");
+  } else if (/[^aeiou]y$/.test(base)) {
+    variants.add(base.slice(0, -1) + "ied");
+  } else {
+    variants.add(base + "ed");
+  }
+
+  // Progressive (ing)
+  if (base.endsWith("e") && !base.endsWith("ee")) {
+    variants.add(base.slice(0, -1) + "ing");
+  } else {
+    variants.add(base + "ing");
+  }
+
+  return [...variants];
 }
 
 const CATEGORY_KEYWORDS: Record<FactCategory, string[]> = {
