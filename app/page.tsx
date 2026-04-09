@@ -401,12 +401,16 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll to bottom when messages change
+  // Auto-scroll to bottom when messages change, but only if the user
+  // is already near the bottom. If they've scrolled up to read earlier
+  // content, don't yank them back down on every streaming chunk.
   useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth",
-    });
+    const el = scrollRef.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distFromBottom < 150) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
   }, [messages]);
 
   // Auto-resize textarea
@@ -1024,7 +1028,7 @@ export default function ChatPage() {
               onKeyDown={handleKeyDown}
               placeholder={noChatBackend ? "Set up a model first ↑" : "Ask me anything"}
               rows={1}
-              disabled={isStreaming || noChatBackend}
+              disabled={noChatBackend}
               className={`w-full resize-none rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ${
                 (() => {
                   const sel = customProviders.find((p) => p.id === selectedProviderId);
