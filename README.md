@@ -36,7 +36,7 @@ The best part is that the LLM will never touch your memory in the database. Ever
 You can run it three ways:
 
 - **Cloud LLMs (recommended for most people).** Add a Claude or OpenAI API key in Settings. Fast, smart, works on any computer. Your memory still stays local in your own Postgres database. Only the chat messages go to the provider.
-- **Local LLMs (recommended for privacy).** Run Gemma 4 via Ollama. Nothing leaves your machine, ever. Slower setup (~18 GB model download) and slower responses, but truly air-gappable.
+- **Local LLMs (recommended for privacy).** Run Gemma 4 via Ollama. Nothing leaves your machine, ever. Slower setup (~7-20 GB model download) and slower responses, but truly air-gappable.
 - **Both.** Use cloud for daily chat, switch to local for the sensitive stuff. The model dropdown lets you pick per-conversation.
 
 ## Features
@@ -78,9 +78,10 @@ The installer sets up Postgres, pgvector, and Ollama (for the embedding model th
 
 Same `npx recallmem` command. When the app opens, click **Settings → Manage models** and download one of these:
 
-- **Gemma 4 E4B** (4 GB, ~5 minute download) — fastest to test
-- **Gemma 4 26B** (18 GB, ~20-30 minute download) — recommended for daily use
-- **Gemma 4 31B** (19 GB, slower, best quality)
+- **Gemma 4 E2B** (~7 GB, fastest download) — good for a quick test or older laptops
+- **Gemma 4 E4B** (~10 GB) — good for most laptops
+- **Gemma 4 26B** (~18 GB, ~20-30 minute download) — recommended for daily use
+- **Gemma 4 31B** (~20 GB, slower, best quality)
 
 Then pick that model from the dropdown and chat. Nothing leaves your machine.
 

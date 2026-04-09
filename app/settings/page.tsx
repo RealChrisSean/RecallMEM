@@ -46,6 +46,9 @@ export default function SettingsPage() {
     refreshModels();
   }, [refreshModels]);
 
+  // Start a model download. Fires a background pull on the server and
+  // polls for progress. The download survives page navigation because
+  // the server does the actual work, not the browser.
   async function pullModel(model: string) {
     setDownloadingModel(model);
     setDownloadProgress({ status: "starting" });
@@ -56,53 +59,56 @@ export default function SettingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model }),
       });
-      if (!res.ok || !res.body) {
+      if (!res.ok) {
         setDownloadError(`Server returned ${res.status}`);
         return;
       }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data:")) continue;
-          const data = trimmed.slice(5).trim();
-          if (!data) continue;
-          try {
-            const json = JSON.parse(data) as {
-              status?: string;
-              total?: number;
-              completed?: number;
-              error?: string;
-            };
-            if (json.error) {
-              setDownloadError(json.error);
-              return;
-            }
-            setDownloadProgress({
-              status: json.status || "downloading",
-              completed: json.completed,
-              total: json.total,
-            });
-            if (json.status === "success") {
-              await refreshModels();
-              setDownloadingModel(null);
-              setDownloadProgress(null);
-              return;
-            }
-          } catch {
-            // skip malformed
+      // Poll for progress every 500ms
+      const poll = setInterval(async () => {
+        try {
+          const pRes = await fetch(`/api/models/pull?model=${encodeURIComponent(model)}`);
+          if (!pRes.ok) return;
+          const p = (await pRes.json()) as {
+            status: string;
+            completed?: number;
+            total?: number;
+            error?: string;
+            done: boolean;
+          };
+          setDownloadProgress({
+            status: p.status,
+            completed: p.completed,
+            total: p.total,
+          });
+          if (p.error) {
+            setDownloadError(p.error);
+            clearInterval(poll);
+            setDownloadingModel(null);
           }
+          if (p.done && !p.error) {
+            clearInterval(poll);
+            await refreshModels();
+            setDownloadingModel(null);
+            setDownloadProgress(null);
+          }
+        } catch {
+          // poll failed, keep trying
         }
-      }
+      }, 500);
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function cancelDownload(model: string) {
+    try {
+      await fetch(`/api/models/pull?model=${encodeURIComponent(model)}`, {
+        method: "DELETE",
+      });
+      setDownloadingModel(null);
+      setDownloadProgress(null);
+    } catch {
+      // ignore
     }
   }
 
@@ -307,15 +313,20 @@ export default function SettingsPage() {
                           >
                             Remove
                           </button>
+                        ) : isCurrentDownload && downloadProgress ? (
+                          <button
+                            onClick={() => cancelDownload(opt.id)}
+                            className="px-3 py-1.5 text-xs font-medium rounded-md border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
+                          >
+                            Cancel
+                          </button>
                         ) : (
                           <button
                             onClick={() => pullModel(opt.id)}
                             disabled={!!downloadingModel}
                             className="px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            {isCurrentDownload && downloadProgress
-                              ? "Downloading..."
-                              : "Download"}
+                            Download
                           </button>
                         )}
                       </div>

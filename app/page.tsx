@@ -297,9 +297,9 @@ export default function ChatPage() {
     }
   }
 
-  // Stream a model download from Ollama via our SSE proxy. Updates
-  // downloadProgress as bytes come in. On success, refresh the installed
-  // list and auto-select the model.
+  // Start a model download via the server-side pull endpoint and poll
+  // for progress. The download runs server-side so it survives page
+  // navigation (settings → chat or vice versa).
   async function startModelDownload(model: string) {
     setDownloadProgress({ status: "starting" });
     setDownloadError(null);
@@ -309,55 +309,57 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model }),
       });
-      if (!res.ok || !res.body) {
+      if (!res.ok) {
         setDownloadError(`Server returned ${res.status}`);
         return;
       }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data:")) continue;
-          const data = trimmed.slice(5).trim();
-          if (!data) continue;
-          try {
-            const json = JSON.parse(data) as {
-              status?: string;
-              total?: number;
-              completed?: number;
-              error?: string;
-            };
-            if (json.error) {
-              setDownloadError(json.error);
-              return;
-            }
-            setDownloadProgress({
-              status: json.status || "downloading",
-              completed: json.completed,
-              total: json.total,
-            });
-            if (json.status === "success") {
-              await refreshInstalledModels();
-              setSelectedModel(model as ModelId);
-              setSelectedProviderId(null);
-              setPendingDownloadModel(null);
-              setDownloadProgress(null);
-              return;
-            }
-          } catch {
-            // skip malformed
+      const poll = setInterval(async () => {
+        try {
+          const pRes = await fetch(`/api/models/pull?model=${encodeURIComponent(model)}`);
+          if (!pRes.ok) return;
+          const p = (await pRes.json()) as {
+            status: string;
+            completed?: number;
+            total?: number;
+            error?: string;
+            done: boolean;
+          };
+          setDownloadProgress({
+            status: p.status,
+            completed: p.completed,
+            total: p.total,
+          });
+          if (p.error) {
+            setDownloadError(p.error);
+            clearInterval(poll);
           }
+          if (p.done && !p.error) {
+            clearInterval(poll);
+            await refreshInstalledModels();
+            setSelectedModel(model as ModelId);
+            setSelectedProviderId(null);
+            setPendingDownloadModel(null);
+            setDownloadProgress(null);
+          }
+        } catch {
+          // poll failed, keep trying
         }
-      }
+      }, 500);
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function cancelModelDownload(model: string) {
+    try {
+      await fetch(`/api/models/pull?model=${encodeURIComponent(model)}`, {
+        method: "DELETE",
+      });
+      setPendingDownloadModel(null);
+      setDownloadProgress(null);
+      setDownloadError(null);
+    } catch {
+      // ignore
     }
   }
 
@@ -1106,24 +1108,33 @@ export default function ChatPage() {
             )}
 
             <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => {
-                  setPendingDownloadModel(null);
-                  setDownloadProgress(null);
-                  setDownloadError(null);
-                }}
-                disabled={!!downloadProgress && !downloadError}
-                className="px-4 py-2 text-sm font-medium rounded-md border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => startModelDownload(pendingDownloadModel)}
-                disabled={!!downloadProgress && !downloadError}
-                className="px-4 py-2 text-sm font-medium rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {downloadProgress && !downloadError ? "Downloading..." : "Download"}
-              </button>
+              {downloadProgress && !downloadError ? (
+                <button
+                  onClick={() => cancelModelDownload(pendingDownloadModel)}
+                  className="px-4 py-2 text-sm font-medium rounded-md border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
+                >
+                  Cancel download
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      setPendingDownloadModel(null);
+                      setDownloadProgress(null);
+                      setDownloadError(null);
+                    }}
+                    className="px-4 py-2 text-sm font-medium rounded-md border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => startModelDownload(pendingDownloadModel)}
+                    className="px-4 py-2 text-sm font-medium rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                  >
+                    Download
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

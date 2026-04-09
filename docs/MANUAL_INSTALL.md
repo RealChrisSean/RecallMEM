@@ -19,7 +19,7 @@ brew services start ollama
 # 4. Pull the models
 ollama pull embeddinggemma      # ~600 MB, REQUIRED
 ollama pull gemma4:26b          # ~18 GB, recommended chat model
-ollama pull gemma4:e4b          # ~4 GB, fast model for background tasks
+ollama pull gemma4:e4b          # ~10 GB, lighter alternative
 ```
 
 ## Linux (Ubuntu/Debian)

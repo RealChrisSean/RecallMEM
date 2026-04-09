@@ -17,7 +17,7 @@ export const MODEL_OPTIONS = [
     id: "gemma4:31b",
     label: "Gemma 4 31B",
     description: "Best quality, slowest. ~17 tok/s",
-    sizeGB: 19,
+    sizeGB: 20,
     recommended: false,
   },
   {
@@ -31,14 +31,14 @@ export const MODEL_OPTIONS = [
     id: "gemma4:e4b",
     label: "Gemma 4 E4B",
     description: "Lighter. Good for laptops. Very fast.",
-    sizeGB: 4,
+    sizeGB: 10,
     recommended: false,
   },
   {
     id: "gemma4:e2b",
     label: "Gemma 4 E2B",
-    description: "Smallest. Phones / 8GB devices.",
-    sizeGB: 2,
+    description: "Smallest. Fastest download.",
+    sizeGB: 7,
     recommended: false,
   },
 ] as const;
