@@ -60,22 +60,29 @@ There's a gap right in the middle: a **complete personal AI app with real workin
 
 ## What it does
 
-Persistent memory across every chat (profile + facts + vector search). Auto-extracts facts from your conversations. Auto-builds a profile of who you are. Vector search over every past chat. Memory inspector you can edit. Custom rules. Wipe memory unrecoverably. File uploads (images, PDFs, code). Bring your own LLM (Ollama, Anthropic, OpenAI, or any OpenAI-compatible API).
+Persistent memory across every chat (profile + facts + vector search) with **temporal awareness** so the model knows what's current vs historical. Auto-extracts facts in real time, retires stale ones when the truth changes, stamps every memory with dates. Vector search over every past chat. Memory inspector you can edit. Custom rules. Wipe memory unrecoverably. File uploads (images, PDFs, code). Web search when using Anthropic. Bring your own LLM (Ollama, Anthropic, OpenAI, or any OpenAI-compatible API). Warm Claude-style dark mode.
 
 <details>
 <summary><strong>Full feature list</strong></summary>
 
 - **Persistent memory across every chat.** Three layers: a synthesized profile of who you are, an extracted facts table, and vector search over all past conversations.
-- **Auto-extracts facts** after every conversation. Categorized into Identity, Family, Work, Health, Interests, etc.
-- **Auto-builds your profile** from the extracted facts. Updates after every chat.
-- **Vector search over every past conversation.** Ask about something you discussed last month, the AI finds it and uses it as context.
-- **Memory inspector page.** View, edit, or delete every fact the AI has learned. You're in control.
+- **Live fact extraction.** Facts get extracted after every assistant reply, not just when the chat ends. Say "my birthday is 11/27" and refresh `/memory` a moment later, it's already there. Always uses the local FAST_MODEL so cloud users don't get billed per turn.
+- **Temporal awareness solves context collapse.** Every fact is stamped with a `valid_from` date. When new information contradicts an old fact ("got laid off from TiDB" replaces "works at TiDB"), the old fact gets retired automatically. The model always sees what's current.
+- **Self-healing categories.** Facts re-route to the correct category after every chat, edit, or delete. No LLM, just a deterministic loop. So when the categorizer improves, your existing memory improves with it.
+- **Resumed-conversation markers.** Open a chat from last week and continue it, the AI sees a system marker like `[Conversation resumed 6 days later]` so it knows time passed and earlier turns are historical.
+- **Dated recall.** When the vector search pulls relevant chunks from past chats, each one is prefixed with the date it came from so the model can tell history from the present.
+- **Auto-builds your profile** from the extracted facts, with date stamps in every section. Updates after every reply.
+- **Vector search across past conversations.** Ask about something you discussed last month, the AI finds it and uses it as context.
+- **Memory inspector page.** View, edit, or delete every fact, with collapsible category sections and a search filter for navigating long lists.
+- **Sidebar chat search.** Toggle between vector search (semantic, needs Ollama for embeddings) and text search (literal ILIKE on titles + transcripts, instant). Both search inside the conversations, not just titles.
+- **Web search toggle.** When you're using an Anthropic provider, a globe button next to the input lets Claude actually browse the web. Hidden for Ollama since local models don't have it.
 - **Custom rules.** Tell the AI how you want to be talked to. "Don't gaslight me." "I have dyslexia, no bullet points." "Don't add disclaimers." It applies them in every chat.
 - **Wipe memory unrecoverably.** `DELETE` + `VACUUM FULL` + `CHECKPOINT`. Gone for good at the database level.
 - **File uploads.** Drag and drop images, PDFs, code, text. Gemma 4 handles vision natively.
-- **Chat history sidebar** with date grouping, search, and pinned chats.
+- **Warm dark mode.** Claude-style charcoal palette via CSS variables, persisted across refreshes with no flash-of-light.
+- **Chat history sidebar** with date grouping, pinned chats, and the search toggle described above.
 - **Markdown rendering** for headings, code blocks, tables.
-- **Streaming responses.**
+- **Streaming responses** with smooth typewriter rendering.
 - **Bring any LLM you want.** Local Gemma 4 via Ollama, or plug in Anthropic (Claude), OpenAI (GPT), or any OpenAI-compatible API (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio, etc).
 - **Test connection** for cloud providers before saving the API key, so you don't find out your key is wrong mid-chat.
 
@@ -93,6 +100,8 @@ Persistent memory across every chat (profile + facts + vector search). Auto-extr
 | **Runs locally** | ✅ | ❌ | ❌ |
 | **Memory retrieval is deterministic (no LLM tool calls)** | ✅ | ❌ | ❌ |
 | **Persistent memory across chats** | ✅ | partial | ✅ |
+| **Temporal awareness (memories know when they were true)** | ✅ | ❌ | ❌ |
+| **Auto-retires stale facts when truth changes** | ✅ | ❌ | ❌ |
 | **You can edit / delete memories** | ✅ | partial | ✅ |
 | **Vector search over past chats** | ✅ | ❌ | ✅ |
 | **Custom rules / behavior** | ✅ | ✅ | ❌ |
@@ -116,17 +125,24 @@ RecallMEM does it backwards. **The chat LLM never touches your memory database.*
 **When you send a message (memory READ path, 100% deterministic):**
 
 1. Plain SQL `SELECT` pulls your profile from `s2m_user_profiles`
-2. Plain SQL `SELECT` pulls your top facts from `s2m_user_facts`
-3. EmbeddingGemma converts your message to a 768-dim vector (math, not generation)
-4. pgvector cosine similarity search ranks chunks from past conversations
-5. TypeScript template assembles all of it into a system prompt
-6. **Then** the chat LLM gets called, with the assembled context already in its prompt
+2. Plain SQL `SELECT` pulls your top *active* facts from `s2m_user_facts` (retired facts are excluded automatically)
+3. Each fact is stamped with its `valid_from` date so the model can reason about timelines
+4. EmbeddingGemma converts your message to a 768-dim vector (math, not generation)
+5. pgvector cosine similarity search ranks chunks from past conversations
+6. Each retrieved chunk is stamped with its source-chat date (`[from conversation on 2026-03-12]`) so the model can tell history from now
+7. If the chat is being resumed after a multi-hour gap, a one-time system marker like `[Conversation resumed 6 days later]` gets injected before the new user turn
+8. TypeScript template assembles all of it into a system prompt
+9. **Then** the chat LLM gets called, with the assembled context already in its prompt
 
 The chat LLM never queries the database. It can't decide what to retrieve. It can't pick which facts are relevant. It can't hallucinate a memory that doesn't exist, because if it's not in the prompt, it doesn't exist for the model. The retrieval is 100% deterministic SQL + cosine similarity. No LLM tool calls touching your memory store.
 
-**When a chat ends (memory WRITE path, LLM proposes, TypeScript validates):**
+**After every assistant reply (memory WRITE path, LLM proposes, TypeScript validates):**
 
-The post-chat pipeline calls a small LLM (Gemma 4 E4B) to extract candidate facts from the transcript. But here's the key: the LLM only **proposes** facts. It cannot write them to the database. The TypeScript layer is the actual gatekeeper, and it runs every candidate fact through six validation steps before storage:
+A small local LLM (Gemma 4 E4B via Ollama) runs in the background to extract candidate facts from the running transcript. This happens fire-and-forget after the stream closes, so you never wait for it. It always uses the local model regardless of which provider the chat itself is using, so cloud users (Claude, GPT) don't get billed per turn for extraction.
+
+The same LLM call also returns the IDs of any **existing** facts the new conversation contradicts. So when you say "I just got laid off from TiDB," the extractor returns the new fact AND flags the old "User works at TiDB" fact for retirement. The TypeScript layer flips those rows to `is_active=false` and stamps `valid_to=NOW()`. History is preserved, the active set always reflects current truth.
+
+But here's the key: the LLM only **proposes** facts and supersession decisions. It cannot write to the database. The TypeScript layer is the actual gatekeeper, and it runs every candidate fact through six validation steps before storage:
 
 1. **Quality gate.** Conversations under 100 characters get zero facts extracted. The LLM never even sees them.
 2. **JSON parse validation.** If the LLM returns malformed JSON or no array, the entire batch is dropped.
@@ -524,11 +540,12 @@ After those three steps, the data is gone from the database in any practically r
 I'm being honest about the limitations. This is v0.1.
 
 - **No voice yet.** It's text only. I want to add Whisper for speech-to-text and Piper for text-to-speech, both local. On the roadmap.
-- **No web search.** The AI doesn't have a "search the internet" tool. It knows what's in its training data + what you tell it + what's in past conversations. If you want web search, that's a separate feature I haven't built.
+- **Web search is Anthropic only right now.** When you use an Anthropic provider, a globe toggle next to the input lets Claude actually browse the web via the native `web_search_20250305` tool. OpenAI's web search needs the Responses API or a search-specific model variant, which isn't plumbed through yet. Ollama doesn't have web search at all (local models can't reach the internet), so the toggle is hidden when you're on Gemma. If you want web search on local models, you'd need to build a generic search layer that calls something like Brave or SerpAPI and prepends results to the prompt, which breaks the "100% local" promise.
 - **No multi-user.** This is a personal app for one person on one machine. If you want a multi-user version, that's a separate fork.
 - **Reasoning models (OpenAI o1/o3, Claude extended thinking) might have edge cases.** They use different API parameters that I don't fully handle yet. Standard chat models work fine.
 - **OpenAI vision isn't fully wired up.** Gemma 4 (4B and up) handles images natively via Ollama. OpenAI uses a different format that I haven't plumbed through. Use Ollama or Anthropic for images.
 - **No mobile app.** It's a web app you run locally. You access it from your browser at `localhost:3000`. A native iOS/Android app is theoretically possible but it's a separate project I haven't started.
+- **Fact supersession is LLM-judged and conservative.** The local Gemma extractor decides whether a new fact contradicts an old one. It's intentionally cautious (only retires a fact when the replacement is unambiguous), so it might occasionally miss a real contradiction or, more rarely, retire something it shouldn't have. You can always inspect and edit/restore in the Memory page. For higher-stakes use cases, you'd want a stricter rule-based supersession layer on top, or a periodic profile-rebuild from full history.
 
 </details>
 
