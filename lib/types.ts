@@ -23,6 +23,8 @@ export interface UserFactRow {
   is_active: boolean;
   superseded_by: string | null;
   created_at: Date;
+  valid_from: Date;
+  valid_to: Date | null;
 }
 
 export interface UserProfileRow {

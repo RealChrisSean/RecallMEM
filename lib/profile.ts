@@ -21,13 +21,13 @@ export async function buildProfileFromFacts(): Promise<string> {
   const facts = await getActiveFacts(1000);
   if (facts.length === 0) return "";
 
-  // Group by category
-  const byCategory = new Map<FactCategory, string[]>();
+  // Group by category, keeping the date so the profile can show timeline
+  const byCategory = new Map<FactCategory, { text: string; date: Date }[]>();
   for (const cat of FACT_CATEGORIES) byCategory.set(cat, []);
   for (const fact of facts) {
     const cat = (fact.category as FactCategory) || "other";
     const list = byCategory.get(cat) || [];
-    list.push(fact.fact_text);
+    list.push({ text: fact.fact_text, date: fact.valid_from || fact.created_at });
   }
 
   // Build the profile sections, respecting caps
@@ -50,7 +50,11 @@ export async function buildProfileFromFacts(): Promise<string> {
     if (items.length === 0) continue;
     const cap = CATEGORY_CAPS[cat];
     const capped = items.slice(0, cap);
-    sections.push(`${labels[cat]}:\n${capped.map((f) => `- ${f}`).join("\n")}`);
+    sections.push(
+      `${labels[cat]}:\n${capped
+        .map((f) => `- [${f.date.toISOString().slice(0, 10)}] ${f.text}`)
+        .join("\n")}`
+    );
   }
 
   return sections.join("\n\n");

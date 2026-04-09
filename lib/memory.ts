@@ -20,15 +20,16 @@ export async function buildMemoryAwareSystemPrompt(
     getRules(),
   ]);
 
-  // Vector search for relevant past chunks (skip if no message yet)
-  let recallChunks: string[] = [];
+  // Vector search for relevant past chunks (skip if no message yet). Each
+  // surviving chunk is stamped with its chat's date so the model knows
+  // when this context was created.
+  let recallChunks: { text: string; date: Date }[] = [];
   if (latestUserMessage && latestUserMessage.length > 5) {
     try {
       const results = await searchChunks(latestUserMessage, excludeChatId, 5);
-      // Only include chunks that are reasonably similar (cosine distance < 0.6)
       recallChunks = results
         .filter((r) => r.distance < 0.6)
-        .map((r) => r.chunk_text);
+        .map((r) => ({ text: r.chunk_text, date: r.chat_created_at }));
     } catch (err) {
       console.error("[memory] vector search failed:", err);
     }
@@ -36,7 +37,10 @@ export async function buildMemoryAwareSystemPrompt(
 
   return buildSystemPrompt({
     profile: profileRow?.profile_summary || null,
-    recentFacts: facts.map((f) => f.fact_text),
+    recentFacts: facts.map((f) => ({
+      text: f.fact_text,
+      date: f.valid_from || f.created_at,
+    })),
     recallChunks,
     lastChatTime,
     customRules: customRules || null,

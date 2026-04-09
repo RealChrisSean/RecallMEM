@@ -6,8 +6,8 @@ const MAX_RULES_CHARS = 4000;
 
 interface PromptContext {
   profile: string | null;
-  recentFacts: string[];
-  recallChunks: string[];
+  recentFacts: { text: string; date: Date }[];
+  recallChunks: { text: string; date: Date }[];
   lastChatTime: Date | null;
   customRules: string | null;
 }
@@ -19,6 +19,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     : null;
 
   const recallText = ctx.recallChunks
+    .map((c) => `[from conversation on ${c.date.toISOString().slice(0, 10)}]\n${c.text}`)
     .join("\n\n---\n\n")
     .slice(0, MAX_RECALL_CHARS);
 
@@ -86,8 +87,10 @@ This is a new user. You don't know them yet. Pay attention and learn about them 
 ${
   ctx.recentFacts.length > 0
     ? `<recent_facts>
-Specific things from recent conversations (use these before guessing):
-${ctx.recentFacts.map((f) => `- ${f}`).join("\n")}
+Specific things from recent conversations (use these before guessing). Each fact is stamped with the date it was first established. Newer facts override older ones if they conflict. Treat older dates as historical context, not the user's present state, unless reaffirmed.
+${ctx.recentFacts
+  .map((f) => `- [${f.date.toISOString().slice(0, 10)}] ${f.text}`)
+  .join("\n")}
 </recent_facts>`
     : ""
 }

@@ -27,11 +27,18 @@ export async function POST(req: NextRequest) {
 
     const mode: ModelMode = body.mode || "standard";
 
-    // Get or create chat row
+    // Get or create chat row. Track the chat's last-updated timestamp so we
+    // can detect "this is a resumed chat from days ago" and inject a gap
+    // marker into the conversation.
     let chatId = body.chatId;
+    let chatLastUpdated: Date | null = null;
     if (chatId) {
       const existing = await getChat(chatId);
-      if (!existing) chatId = undefined;
+      if (!existing) {
+        chatId = undefined;
+      } else {
+        chatLastUpdated = existing.updated_at;
+      }
     }
     if (!chatId) {
       chatId = await createChat(mode);
@@ -44,9 +51,38 @@ export async function POST(req: NextRequest) {
       chatId
     );
 
+    // Detect a resumed chat: if the chat was last touched more than 2 hours
+    // ago and there are existing messages, inject a single system marker
+    // right before the latest user turn so the model knows time passed.
+    const RESUME_GAP_MS = 2 * 60 * 60 * 1000;
+    const now = new Date();
+    const gapMs = chatLastUpdated ? now.getTime() - chatLastUpdated.getTime() : 0;
+    const shouldMarkResume =
+      chatLastUpdated && gapMs > RESUME_GAP_MS && body.messages.length > 1;
+
+    const baseMessages = body.messages.map((m) => ({ role: m.role, content: m.content }));
+    let chatMessages: ChatMessage[];
+    if (shouldMarkResume) {
+      const dateStr = now.toISOString().slice(0, 10);
+      const gapDays = Math.round(gapMs / (24 * 60 * 60 * 1000));
+      const gapText = gapDays >= 1
+        ? `${gapDays} day${gapDays === 1 ? "" : "s"} later`
+        : `${Math.round(gapMs / (60 * 60 * 1000))} hours later`;
+      const marker: ChatMessage = {
+        role: "system",
+        content: `[Conversation resumed ${gapText}, on ${dateStr}. Earlier messages above are historical context from a previous session.]`,
+      };
+      // Insert the marker right before the latest user message
+      const beforeLast = baseMessages.slice(0, -1);
+      const last = baseMessages[baseMessages.length - 1];
+      chatMessages = [...beforeLast, marker, last];
+    } else {
+      chatMessages = baseMessages;
+    }
+
     const llmMessages: ChatMessage[] = [
       { role: "system", content: systemPromptText },
-      ...body.messages.map((m) => ({ role: m.role, content: m.content })),
+      ...chatMessages,
     ];
 
     // Stream the response back as Server-Sent Events

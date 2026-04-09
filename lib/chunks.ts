@@ -48,21 +48,26 @@ export async function embedAndStoreChunks(
   return chunks.length;
 }
 
-// Vector search over past transcript chunks for relevant context
+// Vector search over past transcript chunks for relevant context. Joins
+// against s2m_chats so callers also get the chat's created_at — used by
+// the prompt builder to stamp recalled chunks with their date so the
+// model can tell historical context from current state.
 export async function searchChunks(
   queryText: string,
   excludeChatId: string | null = null,
   limit = 5
-): Promise<{ chunk_text: string; distance: number; chat_id: string }[]> {
+): Promise<{ chunk_text: string; distance: number; chat_id: string; chat_created_at: Date }[]> {
   const userId = await getUserId();
   const queryEmbedding = await embed(queryText);
   const vector = toVectorString(queryEmbedding);
 
   if (excludeChatId) {
     return query(
-      `SELECT chunk_text, chat_id, embedding <=> $1::vector AS distance
-       FROM s2m_transcript_chunks
-       WHERE user_id = $2 AND chat_id != $3
+      `SELECT c.chunk_text, c.chat_id, ch.created_at AS chat_created_at,
+              c.embedding <=> $1::vector AS distance
+       FROM s2m_transcript_chunks c
+       JOIN s2m_chats ch ON ch.id = c.chat_id
+       WHERE c.user_id = $2 AND c.chat_id != $3
        ORDER BY distance ASC
        LIMIT $4`,
       [vector, userId, excludeChatId, limit]
@@ -70,9 +75,11 @@ export async function searchChunks(
   }
 
   return query(
-    `SELECT chunk_text, chat_id, embedding <=> $1::vector AS distance
-     FROM s2m_transcript_chunks
-     WHERE user_id = $2
+    `SELECT c.chunk_text, c.chat_id, ch.created_at AS chat_created_at,
+            c.embedding <=> $1::vector AS distance
+     FROM s2m_transcript_chunks c
+     JOIN s2m_chats ch ON ch.id = c.chat_id
+     WHERE c.user_id = $2
      ORDER BY distance ASC
      LIMIT $3`,
     [vector, userId, limit]

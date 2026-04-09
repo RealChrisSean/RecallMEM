@@ -158,6 +158,105 @@ Return the JSON array now:`;
   }
 }
 
+// Combined extract + supersede pass. Sees the existing active facts and the
+// new transcript in one LLM call, returns both new facts to add AND ids of
+// existing facts that this conversation contradicts/replaces. This solves
+// the staleness side of context collapse: when "got laid off from TiDB"
+// arrives, the older "works at TiDB" gets retired instead of sitting next
+// to it as if both were currently true.
+export async function extractFactsWithSupersession(
+  transcript: string
+): Promise<{ facts: string[]; supersedes: string[] }> {
+  if (!transcript || transcript.length < 100) return { facts: [], supersedes: [] };
+
+  // Pull current active facts so the LLM can compare against them. We pass
+  // id + text so it can return the ids it wants to retire.
+  const userId = await getUserId();
+  const active = await query<{ id: string; fact_text: string }>(
+    `SELECT id, fact_text FROM s2m_user_facts
+     WHERE user_id = $1 AND is_active = TRUE
+     ORDER BY created_at DESC LIMIT 200`,
+    [userId]
+  );
+
+  const existingBlock = active.length === 0
+    ? "(none)"
+    : active.map((f) => `${f.id} :: ${f.fact_text}`).join("\n");
+
+  const prompt = `You are maintaining a long-term memory of facts about the USER. You see (1) the existing active facts and (2) a new conversation transcript. Your job: extract NEW facts to add, AND identify which EXISTING facts the new conversation contradicts or replaces.
+
+EXTRACT new facts that are durable and personal:
+- Identity, family, work, health, interests, goals, opinions, projects
+- Each fact: 8-25 words, third person ("User's wife is Sarah", not "My wife is Sarah")
+
+DO NOT extract:
+- Generic conversation observations or AI behavior notes
+- Temporary moods, speculation, things not directly stated by the user
+
+SUPERSEDE existing facts when the new conversation makes them no longer true:
+- "User works at TiDB" + "User was laid off from TiDB" → supersede the first
+- "User lives in LA" + "User just moved to NYC" → supersede the first
+- "User is single" + "User got engaged to Sarah" → supersede the first
+- Be conservative: only mark a fact superseded if the new information clearly replaces it. If both can still be true (e.g. "User likes coffee" + "User likes tea"), do NOT supersede.
+
+Return ONLY this JSON object, no commentary, no code blocks:
+{"facts": ["new fact 1", "new fact 2"], "supersedes": ["uuid-of-old-fact"]}
+
+EXISTING ACTIVE FACTS:
+${existingBlock}
+
+NEW CONVERSATION TRANSCRIPT:
+${transcript}
+
+Return the JSON object now:`;
+
+  try {
+    const response = await llmChat(
+      [{ role: "user", content: prompt }],
+      { model: FAST_MODEL }
+    );
+    const cleaned = response.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) return { facts: [], supersedes: [] };
+    const parsed = JSON.parse(match[0]) as { facts?: unknown; supersedes?: unknown };
+    const facts = Array.isArray(parsed.facts)
+      ? parsed.facts
+          .filter((f): f is string => typeof f === "string")
+          .map((f) => f.trim())
+          .filter((f) => !isGarbage(f))
+      : [];
+    const supersedes = Array.isArray(parsed.supersedes)
+      ? parsed.supersedes
+          .filter((id): id is string => typeof id === "string")
+          .filter((id) => active.some((a) => a.id === id))
+      : [];
+    return { facts, supersedes };
+  } catch (err) {
+    console.error("[facts] extract+supersede failed:", err);
+    return { facts: [], supersedes: [] };
+  }
+}
+
+// Mark a list of facts as superseded by a new chat. Sets is_active=false,
+// valid_to=NOW(), and (when we know the replacement) superseded_by.
+export async function markFactsSuperseded(
+  factIds: string[],
+  bySourceChatId: string
+): Promise<number> {
+  if (factIds.length === 0) return 0;
+  const userId = await getUserId();
+  const result = await query(
+    `UPDATE s2m_user_facts
+     SET is_active = FALSE, valid_to = NOW()
+     WHERE user_id = $1 AND id = ANY($2::uuid[]) AND is_active = TRUE`,
+    [userId, factIds]
+  );
+  // bySourceChatId currently unused for the FK link; kept in the signature
+  // so future versions can wire superseded_by to a new fact id.
+  void bySourceChatId;
+  return Array.isArray(result) ? result.length : factIds.length;
+}
+
 // Store extracted facts, deduplicating against existing facts
 export async function storeFacts(
   facts: string[],

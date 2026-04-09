@@ -1,6 +1,12 @@
 import { chat as llmChat, FAST_MODEL } from "@/lib/llm";
 import { setChatTitle, getChat } from "@/lib/chats";
-import { extractFactsFromTranscript, storeFacts, recategorizeAllFacts } from "@/lib/facts";
+import {
+  extractFactsFromTranscript,
+  extractFactsWithSupersession,
+  markFactsSuperseded,
+  storeFacts,
+  recategorizeAllFacts,
+} from "@/lib/facts";
 import { rebuildProfile } from "@/lib/profile";
 import { embedAndStoreChunks } from "@/lib/chunks";
 
@@ -22,21 +28,23 @@ export async function runPostChatPipeline(chatId: string): Promise<void> {
       }
     }
 
-    // 2. Extract facts (skip very short conversations)
+    // 2. Extract facts + supersede stale ones (skip very short conversations)
     if (chatRow.message_count >= 4 && chatRow.transcript.length >= 200) {
       try {
-        const facts = await extractFactsFromTranscript(chatRow.transcript);
-        if (facts.length > 0) {
-          const inserted = await storeFacts(facts, chatId);
-          console.log(`[post-chat] extracted ${facts.length} facts, inserted ${inserted} new`);
+        const { facts, supersedes } = await extractFactsWithSupersession(
+          chatRow.transcript
+        );
+        const retired = await markFactsSuperseded(supersedes, chatId);
+        const inserted = facts.length > 0 ? await storeFacts(facts, chatId) : 0;
+        console.log(
+          `[post-chat] extracted ${facts.length}, inserted ${inserted}, retired ${retired}`
+        );
 
-          // 3. Rebuild profile if we added new facts (also recategorize first
-          // so the profile reflects any category fixes)
-          if (inserted > 0) {
-            const moved = await recategorizeAllFacts();
-            if (moved > 0) console.log(`[post-chat] recategorized ${moved} facts`);
-            await rebuildProfile();
-          }
+        // 3. Rebuild profile if anything changed
+        if (inserted > 0 || retired > 0) {
+          const moved = await recategorizeAllFacts();
+          if (moved > 0) console.log(`[post-chat] recategorized ${moved} facts`);
+          await rebuildProfile();
         }
       } catch (err) {
         console.error("[post-chat] fact extraction failed:", err);
@@ -67,11 +75,18 @@ export async function extractFactsLive(chatId: string): Promise<void> {
     // single greeting.
     if (chatRow.message_count < 2 || chatRow.transcript.length < 100) return;
 
-    const facts = await extractFactsFromTranscript(chatRow.transcript);
-    if (facts.length === 0) return;
-    const inserted = await storeFacts(facts, chatId);
-    console.log(`[live-facts] extracted ${facts.length}, inserted ${inserted} new`);
-    if (inserted > 0) {
+    // Combined extract + supersede in one LLM call. Retires stale facts
+    // ("works at TiDB" once "got laid off from TiDB" is said) so the
+    // active set always reflects current truth.
+    const { facts, supersedes } = await extractFactsWithSupersession(
+      chatRow.transcript
+    );
+    const retired = await markFactsSuperseded(supersedes, chatId);
+    const inserted = facts.length > 0 ? await storeFacts(facts, chatId) : 0;
+    console.log(
+      `[live-facts] extracted ${facts.length} new, inserted ${inserted}, retired ${retired}`
+    );
+    if (inserted > 0 || retired > 0) {
       const moved = await recategorizeAllFacts();
       if (moved > 0) console.log(`[live-facts] recategorized ${moved}`);
       await rebuildProfile();
