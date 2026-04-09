@@ -249,39 +249,93 @@ The memory framework doesn't care which LLM you use. It just assembles context. 
 
 ## Quick start
 
-You need these on your machine before `npx recallmem` will fully work. Be honest with yourself about this part: a "local AI chatbot" needs a local LLM, and a local LLM is several gigabytes. There is no install method anywhere that gets around that download. Doing the prereqs first takes ~10 minutes the first time and then you never touch them again.
+### Step 1: Make sure you have Node and Homebrew
 
-**Mac (Homebrew):**
+You need two things on your Mac before running RecallMEM:
+
+- **Node.js 20 or higher.** Check with `node --version`. If it says `command not found` or a number less than 20, install it: `brew install node`.
+- **Homebrew.** Check with `brew --version`. If it's missing, get it from [brew.sh](https://brew.sh).
+
+That's it for prereqs. Everything else gets installed for you in step 2.
+
+### Step 2: Run one command
 
 ```bash
-# 1. Node 20+ (needed for npx)
-brew install node
-
-# 2. Postgres 17 with pgvector
-brew install postgresql@17 pgvector
-brew services start postgresql@17
-
-# 3. Ollama (the local LLM runtime)
-brew install ollama
-brew services start ollama        # IMPORTANT: this starts Ollama in the background.
-                                   # Without it, the chat will fail with "fetch failed".
-
-# 4. Pull at least one Gemma model so the chat actually has a brain to talk to
-ollama pull gemma4:e4b            # ~4GB, fast, works on most laptops, good first test
-ollama pull embeddinggemma        # ~600MB, REQUIRED for memory vector search
-ollama pull gemma4:26b            # ~18GB, recommended for quality. Pull this in the background.
-
-# 5. Now run RecallMEM
 npx recallmem
 ```
 
-**Linux:** same steps but use `apt`/`dnf` for Node and Postgres, and `curl -fsSL https://ollama.com/install.sh | sh` for Ollama. Then `systemctl start ollama`.
+That's the whole install. Here's what happens after you hit Enter, in order:
 
-**Windows:** WSL2 + the Linux steps above. Native Windows is not currently supported.
+1. **It checks what you already have.** Node, Postgres, pgvector, Ollama. Whatever's already installed, it skips.
+2. **It shows you a list of what's missing.** Plain English, with ✓ and ✗ marks.
+3. **It asks one question:** "Install everything now? [Y/n]". Hit Enter to say yes.
+4. **It runs `brew install` for everything missing.** Postgres 17, pgvector, Ollama. You'll see real-time progress in your terminal.
+5. **It starts Postgres and Ollama as background services** so they keep running across reboots. No "fetch failed" surprises.
+6. **It downloads EmbeddingGemma** (~600 MB, takes 1-2 min). This is required for the memory system to work.
+7. **It asks which Gemma 4 chat model you want to install.** Three options:
+   - **1) Gemma 4 26B** — 18 GB, fast, recommended for most people
+   - **2) Gemma 4 31B** — 19 GB, slower, smartest answers
+   - **3) Gemma 4 E2B** — 2 GB, very fast, good for testing or older laptops
+8. **It downloads whichever model you picked.** The 2 GB E2B option finishes in 2-3 min on most internet. The 18 GB option takes 10-30 min depending on your connection.
+9. **It runs database migrations** (~5 seconds).
+10. **It builds the production app** (~30-60 seconds).
+11. **It starts the server.** Open `http://localhost:3000` in your browser and start chatting.
 
-**If you get "fetch failed" when sending a message:** Ollama isn't running. Run `brew services start ollama` (Mac) or `systemctl start ollama` (Linux) and try again.
+The first run takes anywhere from 5 minutes (E2B model on fast internet) to 45 minutes (31B model on slower internet). Most of that time is the model download, not RecallMEM itself. You can walk away — nothing else asks for your input.
 
-**Just want to use cloud models (Claude/GPT) and skip the local stuff?** You still need Node + Postgres, but you can skip Ollama and the model pulls. Run `npx recallmem`, then go to Settings → Providers → Add a new provider with your API key. Pick it from the model dropdown in chat.
+### Want a different model later?
+
+Run any of these in your terminal at any time:
+
+```bash
+ollama pull gemma4:26b
+ollama pull gemma4:31b
+ollama pull gemma4:e2b
+```
+
+Then refresh RecallMEM and pick the new model from the dropdown at the top of the chat.
+
+### Just want to use cloud models (Claude / GPT) and skip the local stuff?
+
+You still need Postgres (for storing your memory locally), but you can skip Ollama and the Gemma download entirely. When the installer asks "Install everything now?", say no, then install just Postgres yourself:
+
+```bash
+brew install postgresql@17 pgvector
+brew services start postgresql@17
+npx recallmem
+```
+
+After the app starts, go to **Settings → Providers → Add a new provider**, paste your Anthropic or OpenAI API key, then pick that model from the dropdown in the chat header.
+
+### Linux
+
+Auto-install on Linux isn't fully wired up yet (the installer prints clear manual instructions if you run it on Linux). You can do it by hand:
+
+```bash
+# Postgres + pgvector via your distro's package manager
+# (apt: postgresql-17 postgresql-17-pgvector, dnf: postgresql17 pgvector_17, etc)
+sudo systemctl start postgresql
+
+# Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+sudo systemctl start ollama
+ollama pull embeddinggemma
+ollama pull gemma4:26b   # or gemma4:e2b for smaller
+
+# Then run
+npx recallmem
+```
+
+### Windows
+
+Native Windows isn't supported. Use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) with Ubuntu and follow the Linux steps above inside WSL.
+
+### Troubleshooting
+
+- **"Homebrew is required to auto-install dependencies"** → Install Homebrew from [brew.sh](https://brew.sh), then re-run `npx recallmem`.
+- **"fetch failed" when sending a message** → Ollama isn't running. Run `brew services start ollama` and refresh the page. The new installer should prevent this from happening on first install, but if you reboot your Mac and forget that brew services restarts on login, this is the fix.
+- **"Postgres is not running"** → `brew services start postgresql@17`.
+- **The setup script asked which model and I picked the wrong one** → Just run `ollama pull gemma4:NEW_SIZE` in your terminal and pick the new one from the chat dropdown. Nothing to redo.
 
 <details>
 <summary><strong>Architecture diagrams (system, memory layers, post-chat sequence)</strong></summary>

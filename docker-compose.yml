@@ -1,0 +1,39 @@
+# Docker Compose for RecallMEM's Postgres + pgvector.
+#
+# Use this if you don't want to install Postgres natively. It runs
+# Postgres 17 with pgvector pre-installed in a container, exposes it
+# on localhost:5432, and persists data to a named volume so your
+# memory survives container restarts.
+#
+# Ollama still runs natively on your host machine. We do NOT
+# containerize Ollama because Docker on Mac loses Metal acceleration
+# and drops generation speed from ~30 tok/s to ~5-8 tok/s, which
+# defeats the entire local-LLM use case.
+#
+# Usage:
+#   docker compose up -d            # start postgres in the background
+#   docker compose down             # stop it
+#   docker compose down -v          # stop AND wipe all data (destructive)
+#   docker compose logs -f db       # tail logs
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: recallmem-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: recallmem
+      POSTGRES_PASSWORD: recallmem
+      POSTGRES_DB: recallmem
+    ports:
+      - "5432:5432"
+    volumes:
+      - recallmem-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recallmem -d recallmem"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  recallmem-data:

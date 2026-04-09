@@ -1,21 +1,26 @@
 /**
  * recallmem init / setup
  *
- * Idempotent setup pipeline:
- *   1. Check Node.js version
- *   2. Check Postgres is installed and running
- *   3. Check pgvector is available
- *   4. Create the database if missing
- *   5. Run migrations
- *   6. Check Ollama (optional - skip if user wants cloud-only)
- *   7. Pull embeddinggemma (required, ~600MB)
- *   8. Offer to pull gemma4:26b (recommended chat model, ~18GB)
- *   9. Generate .env.local with sensible defaults
+ * Real installer (not a hint-giver). Detects what's missing, asks the user
+ * ONE yes/no question, then installs everything for them. Then asks which
+ * Gemma 4 model to download. Then runs the app.
+ *
+ * Pipeline:
+ *   1. Check Node 20+ (hard fail if missing - we can't bootstrap node from npx)
+ *   2. Detect missing pieces (Postgres, pgvector, Ollama)
+ *   3. Show one summary + one prompt: "install everything? Y/n"
+ *   4. Run brew install / brew services start for everything missing
+ *   5. Verify each piece is actually up before moving on
+ *   6. Pull EmbeddingGemma (always, required for memory)
+ *   7. Ask which Gemma 4 chat model to install (1, 2, or 3)
+ *   8. Run migrations
+ *   9. Production build (skipped in dev mode)
+ *   10. Done
  */
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawn, spawnSync, execSync } = require("node:child_process");
+const { spawnSync, execSync } = require("node:child_process");
 
 const {
   getOS,
@@ -26,6 +31,7 @@ const {
   detectOllama,
   detectOllamaModel,
   detectDatabase,
+  commandExists,
 } = require("../lib/detect");
 
 const {
@@ -46,7 +52,7 @@ const {
   blank,
 } = require("../lib/output");
 
-const { confirm } = require("../lib/prompt");
+const { confirm, ask } = require("../lib/prompt");
 
 const DEFAULT_DB_NAME = "recallmem";
 
@@ -71,6 +77,54 @@ function writeEnv(envPath, env) {
   fs.writeFileSync(envPath, lines.join("\n") + "\n");
 }
 
+// Run a shell command and stream output to the user. Returns true on success.
+function run(command, args, label) {
+  if (label) step(label);
+  const result = spawnSync(command, args, { stdio: "inherit" });
+  return result.status === 0;
+}
+
+// Wait up to N seconds for a service to become ready. Used after starting
+// brew services so we don't race ahead before postgres/ollama is actually up.
+async function waitFor(checkFn, timeoutMs = 15000, intervalMs = 500) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await checkFn()) return true;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return false;
+}
+
+// Pretty model menu — short lines, plain words, dyslexia-friendly.
+async function pickGemmaModel() {
+  blank();
+  console.log(color.bold("Pick a Gemma 4 model."));
+  blank();
+  console.log("  1) Gemma 4 26B");
+  console.log("     Size: 18 GB");
+  console.log("     Speed: Fast");
+  console.log("     Best for: Most people. Recommended.");
+  blank();
+  console.log("  2) Gemma 4 31B");
+  console.log("     Size: 19 GB");
+  console.log("     Speed: Slower");
+  console.log("     Best for: People who want the smartest answers, even if it takes longer.");
+  blank();
+  console.log("  3) Gemma 4 E2B");
+  console.log("     Size: 2 GB");
+  console.log("     Speed: Very fast");
+  console.log("     Best for: A quick test. Or older laptops.");
+  blank();
+
+  while (true) {
+    const answer = await ask("Type 1, 2, or 3 and press Enter [1]: ");
+    if (!answer || answer === "1") return { id: "gemma4:26b", label: "Gemma 4 26B" };
+    if (answer === "2") return { id: "gemma4:31b", label: "Gemma 4 31B" };
+    if (answer === "3") return { id: "gemma4:e2b", label: "Gemma 4 E2B" };
+    console.log("  Type 1, 2, or 3.");
+  }
+}
+
 async function setupCommand(opts = {}) {
   const {
     silent = false,
@@ -79,9 +133,10 @@ async function setupCommand(opts = {}) {
     devMode = false,
   } = opts;
   const ENV_PATH = path.join(installPath, ".env.local");
+  const os = getOS();
 
-  // ─── Step 1: Node.js ───────────────────────────────────────────────────
-  if (!silent) section("Checking dependencies");
+  // ─── Step 1: Node.js (hard requirement, we're already running on it) ───
+  if (!silent) section("Checking what you have");
   const node = detectNode();
   if (!node.ok) {
     fail(`Node.js ${node.version} is too old (need ${node.needed}+)`);
@@ -91,54 +146,157 @@ async function setupCommand(opts = {}) {
   }
   success(`Node.js ${node.version}`);
 
-  // ─── Step 2: Postgres ──────────────────────────────────────────────────
-  const pg = detectPostgres();
-  if (!pg.installed) {
-    fail("Postgres not found");
-    blank();
-    console.log(postgresInstallHint());
-    blank();
-    info("Once installed, re-run: npx recallmem");
-    return { ok: false };
-  }
-  if (!pg.ok) {
-    fail(`Postgres ${pg.major} found, but version 17+ is required`);
-    blank();
-    console.log(postgresInstallHint());
-    return { ok: false };
-  }
-  success(`Postgres ${pg.major}`);
+  // ─── Step 2: Detect everything else ───────────────────────────────────
+  let pg = detectPostgres();
+  let pgService = pg.installed ? detectPostgresService() : { running: false };
+  let ollama = detectOllama();
 
-  // ─── Step 3: Postgres service running ──────────────────────────────────
-  const pgService = detectPostgresService();
-  if (!pgService.running) {
-    warn("Postgres is installed but not running");
-    if (getOS() === "mac") {
-      info("Try: brew services start postgresql@17");
-    } else if (getOS() === "linux") {
-      info("Try: sudo systemctl start postgresql");
+  // ─── Step 3: Print a summary of what's there and what's missing ───────
+  blank();
+  console.log(pg.installed && pg.ok
+    ? `  ✓ Postgres ${pg.major}`
+    : "  ✗ Postgres 17 with pgvector — missing");
+  console.log(pgService.running
+    ? "  ✓ Postgres is running"
+    : pg.installed
+      ? "  ✗ Postgres is not running"
+      : "  ✗ Postgres is not running");
+  console.log(ollama.installed && ollama.running
+    ? "  ✓ Ollama is running"
+    : ollama.installed
+      ? "  ✗ Ollama is installed but not running"
+      : "  ✗ Ollama — missing");
+  blank();
+
+  const needPostgres = !pg.installed || !pg.ok;
+  const needPostgresStart = pg.installed && pg.ok && !pgService.running;
+  const needOllama = !ollama.installed;
+  const needOllamaStart = ollama.installed && !ollama.running;
+  const anythingMissing = needPostgres || needPostgresStart || needOllama || needOllamaStart;
+
+  if (anythingMissing) {
+    // Check Homebrew is available before offering auto-install on Mac
+    const hasBrew = os === "mac" && commandExists("brew");
+
+    if (os === "mac" && !hasBrew) {
+      fail("Homebrew is required to auto-install dependencies.");
+      blank();
+      console.log("Install Homebrew first by pasting this in your terminal:");
+      console.log("");
+      console.log("  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"");
+      console.log("");
+      console.log("Then re-run: npx recallmem");
+      return { ok: false };
     }
-    return { ok: false };
+
+    if (os !== "mac" && os !== "linux") {
+      fail(`Auto-install is only supported on Mac and Linux. You're on: ${os}`);
+      info("On Windows, use WSL2 with Ubuntu and re-run npx recallmem inside WSL.");
+      return { ok: false };
+    }
+
+    if (os === "linux") {
+      // Linux is doable but we can't run apt without sudo, and the package
+      // names vary by distro. Print clear instructions and exit.
+      fail("Auto-install is currently only set up for Mac (Homebrew).");
+      blank();
+      console.log("On Linux, install these manually then re-run npx recallmem:");
+      console.log("");
+      console.log("  Postgres 17 with pgvector (your distro's package manager)");
+      console.log("  Ollama: curl -fsSL https://ollama.com/install.sh | sh");
+      console.log("  Then: systemctl start postgresql && systemctl start ollama");
+      return { ok: false };
+    }
+
+    // Mac path: ask once, install everything
+    blank();
+    console.log("I can install and start the missing pieces for you using Homebrew.");
+    console.log("This takes about 2-5 minutes (not counting the model download).");
+    blank();
+    const wantsInstall = await confirm("Install everything now?", true);
+    if (!wantsInstall) {
+      blank();
+      info("Skipped. You can install manually with:");
+      if (needPostgres) console.log("  brew install postgresql@17 pgvector");
+      if (needPostgresStart || needPostgres) console.log("  brew services start postgresql@17");
+      if (needOllama) console.log("  brew install ollama");
+      if (needOllamaStart || needOllama) console.log("  brew services start ollama");
+      return { ok: false };
+    }
+
+    // Install Postgres if missing
+    if (needPostgres) {
+      if (!run("brew", ["install", "postgresql@17", "pgvector"], "Installing Postgres 17 + pgvector...")) {
+        fail("Failed to install Postgres. Try running it manually and re-run npx recallmem.");
+        return { ok: false };
+      }
+      success("Installed Postgres 17 + pgvector");
+      // Re-detect after install
+      pg = detectPostgres();
+    }
+
+    // Start Postgres if not running
+    if (!pgService.running || needPostgres) {
+      step("Starting Postgres in the background...");
+      run("brew", ["services", "start", "postgresql@17"]);
+      // Wait for it to actually accept connections
+      const isUp = await waitFor(() => {
+        const r = detectPostgresService();
+        return r.running;
+      });
+      if (!isUp) {
+        fail("Postgres started but isn't accepting connections after 15s.");
+        info("Try: brew services restart postgresql@17");
+        return { ok: false };
+      }
+      success("Postgres is running on localhost:5432");
+      pgService = { running: true };
+    }
+
+    // Install Ollama if missing
+    if (needOllama) {
+      if (!run("brew", ["install", "ollama"], "Installing Ollama...")) {
+        fail("Failed to install Ollama. Try running it manually and re-run npx recallmem.");
+        return { ok: false };
+      }
+      success("Installed Ollama");
+      ollama = detectOllama();
+    }
+
+    // Start Ollama if not running
+    if (!ollama.running || needOllama) {
+      step("Starting Ollama in the background...");
+      run("brew", ["services", "start", "ollama"]);
+      const isUp = await waitFor(() => {
+        const r = detectOllama();
+        return r.running;
+      });
+      if (!isUp) {
+        fail("Ollama started but isn't responding after 15s.");
+        info("Try: brew services restart ollama");
+        return { ok: false };
+      }
+      success("Ollama is running on localhost:11434");
+      ollama = detectOllama();
+    }
+  } else {
+    success("Everything is already installed and running.");
   }
-  success("Postgres service running on localhost:5432");
 
   // ─── Step 4: env file (we need DATABASE_URL before checking pgvector) ──
   const env = readEnv(ENV_PATH);
   let connectionString = env.DATABASE_URL;
-
   if (!connectionString) {
     connectionString = defaultConnectionString();
-    step(`No .env.local found, will create one with default DATABASE_URL`);
   }
 
   // ─── Step 5: Database exists ───────────────────────────────────────────
-  // Extract the database name from the connection string for accurate messages
   const dbNameMatch = connectionString.match(/\/([^/?]+)(\?|$)/);
   const dbName = dbNameMatch ? dbNameMatch[1] : DEFAULT_DB_NAME;
 
   const dbCheck = await detectDatabase(connectionString);
   if (!dbCheck.exists) {
-    step(`Database '${dbName}' not found, creating...`);
+    step(`Creating database '${dbName}'...`);
     try {
       execSync(`${pg.psqlPath.replace(/psql$/, "createdb")} ${dbName}`, {
         stdio: "pipe",
@@ -164,7 +322,7 @@ async function setupCommand(opts = {}) {
   success("pgvector extension available");
 
   // ─── Step 7: Run migrations ────────────────────────────────────────────
-  step("Running migrations...");
+  step("Running database migrations...");
   try {
     process.env.DATABASE_URL = connectionString;
     const migrateResult = spawnSync("npx", ["tsx", "scripts/migrate.ts"], {
@@ -181,84 +339,56 @@ async function setupCommand(opts = {}) {
     return { ok: false };
   }
 
-  // ─── Step 8: Ollama (optional) ─────────────────────────────────────────
-  section("Checking LLM runtime");
-  const ollama = detectOllama();
-  let ollamaUrl = env.OLLAMA_URL || "http://localhost:11434";
-
-  if (!ollama.installed) {
-    warn("Ollama not installed (optional - you can use cloud providers instead)");
-    blank();
-    console.log(ollamaInstallHint());
-    blank();
-    info("Continuing without Ollama. You can add Claude/OpenAI as a provider in the app.");
-    blank();
-  } else if (!ollama.running) {
-    warn("Ollama is installed but not running");
-    if (getOS() === "mac") {
-      info("Try: brew services start ollama");
-    } else {
-      info("Try: ollama serve");
-    }
-    blank();
-  } else {
-    success(`Ollama running (${ollama.version || "unknown version"})`);
-
-    // ─── Step 9: Required model: embeddinggemma ──────────────────────────
+  // ─── Step 8: Always pull EmbeddingGemma (required for memory) ──────────
+  if (ollama.running) {
+    section("Setting up models");
     const embedModel = await detectOllamaModel("embeddinggemma");
     if (!embedModel.installed) {
-      step("Pulling embeddinggemma (~600MB, required for vector search)...");
+      step("Downloading EmbeddingGemma (~600 MB, required for memory)...");
       try {
         execSync("ollama pull embeddinggemma", { stdio: "inherit" });
-        success("Pulled embeddinggemma");
+        success("EmbeddingGemma installed");
       } catch (err) {
         fail(`Failed to pull embeddinggemma: ${err.message}`);
         return { ok: false };
       }
     } else {
-      success("embeddinggemma installed");
+      success("EmbeddingGemma already installed");
     }
 
-    // ─── Step 10: Recommended model: gemma4:26b ──────────────────────────
-    const chatModel = await detectOllamaModel("gemma4:26b");
-    if (!chatModel.installed && !skipIfDone) {
-      blank();
-      info("Recommended chat model: gemma4:26b (~18GB)");
-      info("Optional - you can use cloud providers (Claude, GPT) instead.");
-      const wantsPull = await confirm("Pull gemma4:26b now?", false);
-      if (wantsPull) {
-        try {
-          execSync("ollama pull gemma4:26b", { stdio: "inherit" });
-          success("Pulled gemma4:26b");
-        } catch (err) {
-          fail(`Failed to pull gemma4:26b: ${err.message}`);
-          info("You can pull it later with: ollama pull gemma4:26b");
-        }
-      } else {
-        info("Skipped. You can pull it later with: ollama pull gemma4:26b");
+    // ─── Step 9: Pick a Gemma 4 chat model ───────────────────────────────
+    // Check if any Gemma 4 chat model is already installed first.
+    const has26 = await detectOllamaModel("gemma4:26b");
+    const has31 = await detectOllamaModel("gemma4:31b");
+    const hasE2 = await detectOllamaModel("gemma4:e2b");
+    const hasAny = has26.installed || has31.installed || hasE2.installed;
+
+    if (!hasAny && !skipIfDone) {
+      const choice = await pickGemmaModel();
+      step(`Downloading ${choice.label}... (this can take a while)`);
+      try {
+        execSync(`ollama pull ${choice.id}`, { stdio: "inherit" });
+        success(`${choice.label} installed`);
+      } catch (err) {
+        fail(`Failed to pull ${choice.id}: ${err.message}`);
+        info(`You can pull it later with: ollama pull ${choice.id}`);
       }
-    } else if (chatModel.installed) {
-      success("gemma4:26b installed");
+    } else if (hasAny) {
+      success("A Gemma 4 chat model is already installed");
     }
   }
 
-  // ─── Step 11: Write .env.local ─────────────────────────────────────────
-  section("Writing config");
+  // ─── Step 10: Write .env.local ─────────────────────────────────────────
   const finalEnv = {
     DATABASE_URL: env.DATABASE_URL || connectionString,
-    OLLAMA_URL: env.OLLAMA_URL || ollamaUrl,
+    OLLAMA_URL: env.OLLAMA_URL || "http://localhost:11434",
     OLLAMA_CHAT_MODEL: env.OLLAMA_CHAT_MODEL || "gemma4:26b",
     OLLAMA_FAST_MODEL: env.OLLAMA_FAST_MODEL || "gemma4:e4b",
     OLLAMA_EMBED_MODEL: env.OLLAMA_EMBED_MODEL || "embeddinggemma",
   };
-  const existedBefore = fs.existsSync(ENV_PATH);
   writeEnv(ENV_PATH, finalEnv);
-  success(`.env.local ${existedBefore ? "updated" : "created"}`);
 
-  // ─── Step 12: Production build (skipped in dev mode) ──────────────────
-  // End users get a production build for speed and to avoid dev-mode hot-reload
-  // hydration warnings. Developers in their own checkout (devMode=true) skip the
-  // build so they get hot reload via `next dev`.
+  // ─── Step 11: Production build (skipped in dev mode) ──────────────────
   if (!devMode) {
     const hasBuild = fs.existsSync(
       path.join(installPath, ".next", "BUILD_ID")
@@ -279,15 +409,19 @@ async function setupCommand(opts = {}) {
         }
       } catch (err) {
         warn(`Build failed: ${err.message}`);
-        info("Falling back to dev mode at runtime");
       }
-    } else {
-      success("Production build already exists");
     }
   }
 
   blank();
   success(color.bold("Setup complete!"));
+  blank();
+  console.log("Want a different Gemma 4 model later? Run one of these:");
+  console.log("  ollama pull gemma4:26b");
+  console.log("  ollama pull gemma4:31b");
+  console.log("  ollama pull gemma4:e2b");
+  console.log("");
+  console.log("Then pick it from the dropdown at the top of the chat.");
   blank();
 
   return { ok: true };
