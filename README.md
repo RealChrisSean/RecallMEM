@@ -14,7 +14,7 @@
 <p align="center">
   Two products in one repo:
   <br>
-  <strong>👤 For users:</strong> install with <code>npx recallmem</code> and start chatting with an AI that actually remembers you.
+  <strong>👤 For users:</strong> install Node, Postgres, and Ollama (~10 minutes, see Quick Start below), then run <code>npx recallmem</code> to chat with an AI that actually remembers you.
   <br>
   <strong>👨‍💻 For developers:</strong> fork it and build your own AI app on top of the memory framework in <code>lib/</code>.
 </p>
