@@ -55,6 +55,32 @@ export async function runPostChatPipeline(chatId: string): Promise<void> {
   }
 }
 
+// Per-message live extraction. Runs after every assistant reply as fire-and-
+// forget so facts surface in real time without waiting for the user to end the
+// chat. Always uses the local FAST_MODEL (Ollama) so cloud-provider users
+// don't get billed per turn for fact extraction.
+export async function extractFactsLive(chatId: string): Promise<void> {
+  try {
+    const chatRow = await getChat(chatId);
+    if (!chatRow || !chatRow.transcript) return;
+    // Same quality bar as the batch pipeline so we don't extract from a
+    // single greeting.
+    if (chatRow.message_count < 2 || chatRow.transcript.length < 100) return;
+
+    const facts = await extractFactsFromTranscript(chatRow.transcript);
+    if (facts.length === 0) return;
+    const inserted = await storeFacts(facts, chatId);
+    console.log(`[live-facts] extracted ${facts.length}, inserted ${inserted} new`);
+    if (inserted > 0) {
+      const moved = await recategorizeAllFacts();
+      if (moved > 0) console.log(`[live-facts] recategorized ${moved}`);
+      await rebuildProfile();
+    }
+  } catch (err) {
+    console.error("[live-facts] failed:", err);
+  }
+}
+
 // Just the title step from the pipeline. Used after the very first assistant
 // response so the chat shows up in the sidebar with a real title immediately,
 // instead of waiting for the user to click "New chat".
