@@ -1316,6 +1316,9 @@ function Sidebar({
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
             RecallMEM
           </h2>
+          <span className="text-[9px] text-zinc-400 dark:text-zinc-600">
+            v{process.env.NEXT_PUBLIC_APP_VERSION}
+          </span>
         </div>
         <button
           onClick={onClose}
