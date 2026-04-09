@@ -206,8 +206,8 @@ Return the JSON array now:`;
 // Combined extract + supersede pass. Sees the existing active facts and the
 // new transcript in one LLM call, returns both new facts to add AND ids of
 // existing facts that this conversation contradicts/replaces. This solves
-// the staleness side of context collapse: when "got laid off from TiDB"
-// arrives, the older "works at TiDB" gets retired instead of sitting next
+// the staleness side of context collapse: when "left Acme for a new job"
+// arrives, the older "works at Acme" gets retired instead of sitting next
 // to it as if both were currently true.
 export async function extractFactsWithSupersession(
   transcript: string
@@ -239,9 +239,9 @@ DO NOT extract:
 - Temporary moods, speculation, things not directly stated by the user
 
 SUPERSEDE existing facts when the new conversation makes them no longer true:
-- "User works at TiDB" + "User was laid off from TiDB" → supersede the first
-- "User lives in LA" + "User just moved to NYC" → supersede the first
-- "User is single" + "User got engaged to Sarah" → supersede the first
+- "User works at Acme" + "User left Acme to start a new job" → supersede the first
+- "User lives in city A" + "User just moved to city B" → supersede the first
+- "User is single" + "User got engaged" → supersede the first
 - Be conservative: only mark a fact superseded if the new information clearly replaces it. If both can still be true (e.g. "User likes coffee" + "User likes tea"), do NOT supersede.
 
 Return ONLY this JSON object, no commentary, no code blocks:

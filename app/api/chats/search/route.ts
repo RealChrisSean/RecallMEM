@@ -13,7 +13,7 @@ export const runtime = "nodejs";
 // Vector mode: embeds the query, runs cosine similarity over transcript chunks,
 //   collapses to distinct chat ids ordered by best match. Also unions title
 //   matches so a query like "databricks" still surfaces a chat titled
-//   "Databricks interview" even if the body wasn't embedded yet.
+//   "Acme interview" even if the body wasn't embedded yet.
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);

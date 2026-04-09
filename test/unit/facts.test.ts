@@ -13,12 +13,12 @@ describe("matchesKeyword (prefix word match)", () => {
   });
 
   it("matches past tense forms", () => {
-    expect(matchesKeyword("user previously worked at TiDB", "work")).toBe(true);
+    expect(matchesKeyword("user previously worked at Acme", "work")).toBe(true);
     expect(matchesKeyword("user was hired in 2024", "hire")).toBe(true);
   });
 
   it("matches progressive forms", () => {
-    expect(matchesKeyword("user is interviewing at Databricks", "interview")).toBe(true);
+    expect(matchesKeyword("user is interviewing at a startup", "interview")).toBe(true);
     expect(matchesKeyword("user is working remotely", "work")).toBe(true);
   });
 

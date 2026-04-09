@@ -89,7 +89,7 @@ export async function extractFactsLive(chatId: string): Promise<void> {
     }
 
     // Combined extract + supersede in one LLM call. Retires stale facts
-    // ("works at TiDB" once "got laid off from TiDB" is said) so the
+    // ("works at Acme" once "left Acme for a new job" is said) so the
     // active set always reflects current truth.
     const extractSpan = trace?.span({
       name: "extract-and-supersede",

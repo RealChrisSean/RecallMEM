@@ -67,7 +67,7 @@ Persistent memory across every chat (profile + facts + vector search) with **tem
 
 - **Persistent memory across every chat.** Three layers: a synthesized profile of who you are, an extracted facts table, and vector search over all past conversations.
 - **Live fact extraction.** Facts get extracted after every assistant reply, not just when the chat ends. Say "my birthday is 11/27" and refresh `/memory` a moment later, it's already there. Always uses the local FAST_MODEL so cloud users don't get billed per turn.
-- **Temporal awareness solves context collapse.** Every fact is stamped with a `valid_from` date. When new information contradicts an old fact ("got laid off from TiDB" replaces "works at TiDB"), the old fact gets retired automatically. The model always sees what's current.
+- **Temporal awareness solves context collapse.** Every fact is stamped with a `valid_from` date. When new information contradicts an old fact ("left Acme" replaces "works at Acme"), the old fact gets retired automatically. The model always sees what's current.
 - **Self-healing categories.** Facts re-route to the correct category after every chat, edit, or delete. No LLM, just a deterministic loop. So when the categorizer improves, your existing memory improves with it.
 - **Resumed-conversation markers.** Open a chat from last week and continue it, the AI sees a system marker like `[Conversation resumed 6 days later]` so it knows time passed and earlier turns are historical.
 - **Dated recall.** When the vector search pulls relevant chunks from past chats, each one is prefixed with the date it came from so the model can tell history from the present.
@@ -140,7 +140,7 @@ The chat LLM never queries the database. It can't decide what to retrieve. It ca
 
 A small local LLM (Gemma 4 E4B via Ollama) runs in the background to extract candidate facts from the running transcript. This happens fire-and-forget after the stream closes, so you never wait for it. It always uses the local model regardless of which provider the chat itself is using, so cloud users (Claude, GPT) don't get billed per turn for extraction.
 
-The same LLM call also returns the IDs of any **existing** facts the new conversation contradicts. So when you say "I just got laid off from TiDB," the extractor returns the new fact AND flags the old "User works at TiDB" fact for retirement. The TypeScript layer flips those rows to `is_active=false` and stamps `valid_to=NOW()`. History is preserved, the active set always reflects current truth.
+The same LLM call also returns the IDs of any **existing** facts the new conversation contradicts. So when you say "I just left Acme to start a new job," the extractor returns the new fact AND flags the old "User works at Acme" fact for retirement. The TypeScript layer flips those rows to `is_active=false` and stamps `valid_to=NOW()`. History is preserved, the active set always reflects current truth.
 
 But here's the key: the LLM only **proposes** facts and supersession decisions. It cannot write to the database. The TypeScript layer is the actual gatekeeper, and it runs every candidate fact through six validation steps before storage:
 
