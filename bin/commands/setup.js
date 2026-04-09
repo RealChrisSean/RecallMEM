@@ -363,7 +363,10 @@ async function setupCommand(opts = {}) {
     const hasE2 = await detectOllamaModel("gemma4:e2b");
     const hasAny = has26.installed || has31.installed || hasE2.installed;
 
-    if (!hasAny && !skipIfDone) {
+    // Always show the picker when no Gemma chat model is installed.
+    // skipIfDone is intentionally NOT checked here - on a fresh machine
+    // we MUST pull a model or the chat 404s on first message.
+    if (!hasAny) {
       const choice = await pickGemmaModel();
       step(`Downloading ${choice.label}... (this can take a while)`);
       try {
