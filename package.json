@@ -1,6 +1,6 @@
 {
   "name": "recallmem",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Private, local-first AI chatbot with persistent working memory",
   "license": "Apache-2.0",
   "author": "Chris Sean",
