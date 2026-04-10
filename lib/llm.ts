@@ -55,6 +55,7 @@ export interface ChatOptions {
   model?: string; // override the default model (for ollama path)
   providerId?: string; // if set, route through a custom provider
   webSearch?: boolean; // enable native web search tool (anthropic/openai only)
+  thinking?: boolean; // enable thinking/reasoning mode
 }
 
 interface ResolvedProvider {
@@ -101,10 +102,11 @@ export async function* chatStream(
   const provider = await resolveProvider(options);
   // Web search only works on cloud providers; Ollama silently ignores it
   const webSearch = !!options.webSearch && provider.type !== "ollama";
+  const thinking = !!options.thinking;
   if (provider.type === "anthropic") {
     yield* anthropicStream(provider, messages, webSearch);
   } else if (provider.type === "ollama") {
-    yield* ollamaStream(provider, messages);
+    yield* ollamaStream(provider, messages, thinking);
   } else {
     // OpenAI web search requires the Responses API or a search-enabled model;
     // skipping for now so the toggle stays Anthropic-only.
@@ -183,7 +185,8 @@ export async function chat(
 
 async function* ollamaStream(
   provider: ResolvedProvider,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
+  thinking = false
 ): AsyncGenerator<ChatStreamChunk> {
   const res = await fetch(`${provider.baseUrl}/api/chat`, {
     method: "POST",
@@ -192,7 +195,7 @@ async function* ollamaStream(
       model: provider.model,
       messages,
       stream: true,
-      think: false,
+      think: thinking,
     }),
   });
   if (!res.ok || !res.body) {
@@ -201,6 +204,8 @@ async function* ollamaStream(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let thinkingStarted = false;
+  let thinkingEnded = false;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -211,12 +216,36 @@ async function* ollamaStream(
       if (!line.trim()) continue;
       try {
         const json = JSON.parse(line) as {
-          message?: { content?: string };
+          message?: { content?: string; thinking?: string };
           done: boolean;
         };
-        const delta = json.message?.content || "";
-        if (delta) yield { delta, done: false };
+        // When think=true, Ollama sends reasoning in `thinking` and
+        // the visible response in `content`. We wrap thinking tokens
+        // in <think> tags so the client can render them in a
+        // collapsible section.
+        const thinkDelta = json.message?.thinking || "";
+        const contentDelta = json.message?.content || "";
+
+        if (thinkDelta && !contentDelta) {
+          // Still in the thinking phase
+          if (!thinkingStarted) {
+            yield { delta: "<think>\n", done: false };
+            thinkingStarted = true;
+          }
+          yield { delta: thinkDelta, done: false };
+        } else if (contentDelta) {
+          // Transitioned to the response phase
+          if (thinkingStarted && !thinkingEnded) {
+            yield { delta: "\n</think>\n\n", done: false };
+            thinkingEnded = true;
+          }
+          yield { delta: contentDelta, done: false };
+        }
+
         if (json.done) {
+          if (thinkingStarted && !thinkingEnded) {
+            yield { delta: "\n</think>\n\n", done: false };
+          }
           yield { delta: "", done: true };
           return;
         }

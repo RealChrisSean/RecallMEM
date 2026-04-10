@@ -10,7 +10,7 @@ import { getSetting } from "@/lib/settings";
  * the system prompt as context. Same RAG pattern as memory recall, just
  * outward-facing.
  *
- * Backend: Brave Search API. Generous free tier (2000/month), independent
+ * Backend: Brave Search API. $5/1,000 requests with $5 free monthly credits
  * index, clean privacy story (no scraping, real ToS).
  *
  * **The data leaves the machine.** This is the only place in RecallMEM
@@ -19,7 +19,7 @@ import { getSetting } from "@/lib/settings";
  * the first time. Memory, facts, profile, transcripts all stay local; only
  * the query string itself goes to Brave.
  *
- * Setup: get a free API key at https://brave.com/search/api and set
+ * Setup: get an API key at https://brave.com/search/api and set
  * BRAVE_SEARCH_API_KEY in your .env.local. Without the key this function
  * returns an empty result set (no-op).
  */
@@ -75,7 +75,7 @@ export async function searchWeb(
       return {
         status: "quota-exhausted",
         results: [],
-        message: "Brave Search free tier quota exhausted for this month.",
+        message: "Brave Search monthly credits exhausted. Additional requests will be charged at $5/1,000.",
       };
     }
     if (!res.ok) {
@@ -123,7 +123,7 @@ ${formatted}
 
   if (outcome.status === "no-key") {
     return `<web_search_unavailable>
-The user toggled web search ON but no Brave Search API key is configured. Briefly tell the user that web search needs a free Brave Search API key, and they can add it on the Settings page (link: /settings). The free key is at https://brave.com/search/api. Then answer their question from your existing knowledge.
+The user toggled web search ON but no Brave Search API key is configured. Briefly tell the user that web search needs a Brave Search API key ($5/1,000 requests, includes $5 free credits every month), and they can add it on the Settings page (link: /settings). Sign up at https://brave.com/search/api. Then answer their question from your existing knowledge.
 </web_search_unavailable>`;
   }
 

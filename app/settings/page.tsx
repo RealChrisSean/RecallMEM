@@ -375,7 +375,7 @@ export default function SettingsPage() {
           <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
             <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4 leading-relaxed">
               Local models like Gemma can&apos;t browse the web on their own, so RecallMEM uses{" "}
-              <strong>Brave Search</strong> as a backend. The free tier gives you 2,000 searches per month.
+              <strong>Brave Search</strong> as a backend. Brave gives you $5 in free credits every month, which covers about 1,000 searches.
             </p>
 
             <div className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-3 mb-4">

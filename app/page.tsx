@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, FormEvent, DragEvent, ChangeEvent } from "react";
+import { useState, useRef, useEffect, useCallback, memo, FormEvent, DragEvent, ChangeEvent } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -59,6 +59,7 @@ export default function ChatPage() {
   const [webSearch, setWebSearch] = useState(false);
   const [showWebSearchWarning, setShowWebSearchWarning] = useState(false);
   const [dontShowWebSearchWarning, setDontShowWebSearchWarning] = useState(false);
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
   // Installed Ollama models. Used to detect when the user picks one from
   // the dropdown that hasn't been pulled yet, so we can offer to download.
   const [installedOllamaModels, setInstalledOllamaModels] = useState<Set<string>>(
@@ -75,13 +76,17 @@ export default function ChatPage() {
   // True when the user has no way to chat yet: no Gemma chat model
   // installed AND no cloud provider configured. Drives the empty-state
   // banner above the input and disables the message input until they
-  // pick one or the other. The empty state can flip back to enabled
-  // mid-session as they download a model or add a provider.
+  // pick one or the other.
+  //
+  // IMPORTANT: only compute this AFTER the models + providers lists have
+  // loaded. Before that, both are empty sets/arrays and we'd wrongly
+  // disable the input on every page load until the async fetches finish.
+  const [modelsLoaded, setModelsLoaded] = useState(false);
   const hasGemmaInstalled = Array.from(installedOllamaModels).some((name) =>
     name.startsWith("gemma4")
   );
   const hasCloudProvider = customProviders.some((p) => p.type !== "ollama");
-  const noChatBackend = !hasGemmaInstalled && !hasCloudProvider;
+  const noChatBackend = modelsLoaded && !hasGemmaInstalled && !hasCloudProvider;
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const chatIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -175,7 +180,18 @@ export default function ChatPage() {
         messages: Message[];
       };
       setChatId(data.id);
-      setMessages(data.messages);
+      // Strip trailing empty assistant messages — these can be left over
+      // from a periodic save during streaming if the user refreshed
+      // mid-generation. Without this, reloading shows typing dots forever.
+      let msgs = data.messages;
+      while (
+        msgs.length > 0 &&
+        msgs[msgs.length - 1].role === "assistant" &&
+        !msgs[msgs.length - 1].content?.trim()
+      ) {
+        msgs = msgs.slice(0, -1);
+      }
+      setMessages(msgs);
       setInput("");
       setAttachedFiles([]);
       setUploadError(null);
@@ -275,8 +291,10 @@ export default function ChatPage() {
         }
         setInstalledOllamaModels(names);
       }
+      setModelsLoaded(true);
     } catch (err) {
       console.error("[models] list failed:", err);
+      setModelsLoaded(true); // still mark loaded so we don't block the input forever
     }
   }, []);
   useEffect(() => {
@@ -400,6 +418,8 @@ export default function ChatPage() {
   }, [messages.length]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
 
   // Auto-scroll to bottom when messages change, but only if the user
   // is already near the bottom. If they've scrolled up to read earlier
@@ -620,6 +640,8 @@ export default function ChatPage() {
     setMessages([...newMessages, { role: "assistant", content: "" }]);
 
     try {
+      const abort = new AbortController();
+      abortRef.current = abort;
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -631,7 +653,9 @@ export default function ChatPage() {
             ? { providerId: selectedProviderId }
             : { model: selectedModel }),
           webSearch,
+          thinking: thinkingEnabled,
         }),
+        signal: abort.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -642,23 +666,26 @@ export default function ChatPage() {
       const decoder = new TextDecoder();
       let buffer = "";
 
-      // Smooth typewriter rendering. Incoming chunks go into a pending buffer
-      // and a requestAnimationFrame loop drains it into displayed content at
-      // a steady rate. Prevents jerky bursts when the stream delivers chunks
-      // unevenly (which it always does).
+      // Typewriter rendering. Uses setInterval instead of requestAnimationFrame
+      // so it keeps running in background tabs. Adaptive drain rate: when the
+      // buffer is small, drain slowly for a smooth effect. When the buffer is
+      // large (LLM is faster than rendering), drain in bigger chunks so the
+      // text doesn't lag seconds behind the actual generation.
       let pendingText = "";
       let displayedText = "";
       let streamFinished = false;
-      const CHARS_PER_FRAME = 3; // ~180 chars/sec at 60fps. Tune for taste.
 
-      const drainTick = () => {
+      const drainInterval = setInterval(() => {
         if (pendingText.length === 0) {
-          if (streamFinished) return; // we're done, stop the loop
-          // Wait for more data
-          requestAnimationFrame(drainTick);
+          if (streamFinished) clearInterval(drainInterval);
           return;
         }
-        const charsToTake = Math.min(CHARS_PER_FRAME, pendingText.length);
+        // Adaptive: drain more chars when backlog is large
+        const charsToTake = pendingText.length > 100
+          ? Math.min(50, pendingText.length)  // big backlog: flush fast
+          : pendingText.length > 20
+            ? Math.min(10, pendingText.length) // medium backlog
+            : Math.min(3, pendingText.length); // small: smooth typewriter
         displayedText += pendingText.slice(0, charsToTake);
         pendingText = pendingText.slice(charsToTake);
         const snapshot = displayedText;
@@ -670,9 +697,7 @@ export default function ChatPage() {
           };
           return updated;
         });
-        requestAnimationFrame(drainTick);
-      };
-      requestAnimationFrame(drainTick);
+      }, 16); // ~60fps
 
       try {
         while (true) {
@@ -710,27 +735,46 @@ export default function ChatPage() {
           }
         }
       } finally {
-        // Mark stream finished and wait for the typewriter to drain
+        // Mark stream finished. The interval will clear itself once
+        // pendingText is drained. Flush any remaining text immediately
+        // so the user doesn't wait for the interval to tick.
         streamFinished = true;
-        await new Promise<void>((resolve) => {
-          const waitForDrain = () => {
-            if (pendingText.length === 0) {
-              resolve();
-            } else {
-              requestAnimationFrame(waitForDrain);
-            }
-          };
-          waitForDrain();
-        });
+        if (pendingText.length > 0) {
+          displayedText += pendingText;
+          pendingText = "";
+          const snapshot = displayedText;
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              role: "assistant",
+              content: snapshot,
+            };
+            return updated;
+          });
+        }
+        clearInterval(drainInterval);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      setMessages((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1] = { role: "assistant", content: `Error: ${message}` };
-        return updated;
-      });
+      if ((err as Error).name === "AbortError") {
+        // User clicked stop. Remove the empty assistant message if
+        // nothing was generated, keep it if partial content exists.
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.role === "assistant" && !last.content?.trim()) {
+            return prev.slice(0, -1);
+          }
+          return prev;
+        });
+      } else {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { role: "assistant", content: `Error: ${message}` };
+          return updated;
+        });
+      }
     } finally {
+      abortRef.current = null;
       setIsStreaming(false);
       refreshChatList();
       // Poll for the title to appear (server generates it fire-and-forget after
@@ -742,6 +786,13 @@ export default function ChatPage() {
           // Silent fail. The title will appear on the next manual refresh.
         });
       }
+    }
+  }
+
+  function stopStreaming() {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
     }
   }
 
@@ -880,7 +931,16 @@ export default function ChatPage() {
       </header>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto relative"
+        onScroll={() => {
+          const el = scrollRef.current;
+          if (!el) return;
+          const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+          setShowScrollDown(distFromBottom > 300);
+        }}
+      >
         <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
           {messages.length === 0 ? (
             <div className="text-center py-20">
@@ -893,6 +953,26 @@ export default function ChatPage() {
           )}
         </div>
       </div>
+
+      {/* Scroll-to-bottom button — appears when user has scrolled up */}
+      {showScrollDown && (
+        <div className="flex justify-center -mt-6 mb-2 relative z-10">
+          <button
+            onClick={() =>
+              scrollRef.current?.scrollTo({
+                top: scrollRef.current.scrollHeight,
+                behavior: "smooth",
+              })
+            }
+            className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-300 dark:hover:bg-zinc-700 flex items-center justify-center shadow-md transition-colors"
+            title="Scroll to bottom"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* Empty state banner: no Gemma installed AND no cloud provider configured */}
       {noChatBackend && (
@@ -1021,6 +1101,13 @@ export default function ChatPage() {
                 </div>
               );
             })()}
+            {/* Thinking toggle — disabled for now. With long chat contexts,
+                thinking mode can cause Ollama to spend minutes reasoning
+                before producing any visible tokens, which jams the single-
+                request queue and blocks all subsequent requests. Re-enable
+                once we add: (1) a timeout on thinking requests, (2) context
+                trimming for think mode, (3) streaming thinking tokens
+                through the typewriter correctly. */}
             <textarea
               ref={inputRef}
               value={input}
@@ -1037,13 +1124,26 @@ export default function ChatPage() {
                 })()
               } pr-12 py-3 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700 disabled:opacity-50`}
             />
-            <button
-              type="submit"
-              disabled={(!input.trim() && attachedFiles.length === 0) || isStreaming || noChatBackend}
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
-            >
-              <ArrowUpIcon />
-            </button>
+            {isStreaming ? (
+              <button
+                type="button"
+                onClick={stopStreaming}
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center hover:bg-red-700 transition-colors"
+                title="Stop generating"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="4" y="4" width="16" height="16" rx="2" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={(!input.trim() && attachedFiles.length === 0) || noChatBackend}
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
+              >
+                <ArrowUpIcon />
+              </button>
+            )}
           </div>
         </form>
       </div>
@@ -1152,7 +1252,7 @@ export default function ChatPage() {
               Web search needs a free Brave Search API key
             </h2>
             <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4 leading-relaxed">
-              Local models (Gemma) can&apos;t browse the web on their own, so RecallMEM uses Brave Search as a backend. The free tier gives you 2,000 searches per month, which is plenty for personal use.
+              Local models (Gemma) can&apos;t browse the web on their own, so RecallMEM uses Brave Search as a backend. Brave gives you $5 in free credits every month, which covers about 1,000 searches.
             </p>
 
             <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-3 mb-4">
@@ -1660,12 +1760,39 @@ function TrashIcon() {
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+const MessageBubble = memo(function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
+  const [copied, setCopied] = useState(false);
+
+  // Parse <think>...</think> from assistant content for display.
+  // Handles both complete (closed tag) and in-progress (unclosed) thinking.
+  let thinkContent: string | null = null;
+  let thinkingInProgress = false;
+  let displayContent = message.content;
+  if (!isUser && message.content) {
+    const closedMatch = message.content.match(/^<think>([\s\S]*?)<\/think>\s*/);
+    if (closedMatch) {
+      thinkContent = closedMatch[1].trim();
+      displayContent = message.content.slice(closedMatch[0].length);
+    } else if (message.content.startsWith("<think>")) {
+      // Thinking is still streaming — no closing tag yet
+      thinkContent = message.content.slice(7).trim();
+      displayContent = "";
+      thinkingInProgress = true;
+    }
+  }
+
+  function copyToClipboard() {
+    navigator.clipboard.writeText(message.content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+        className={`relative max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
           isUser
             ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 whitespace-pre-wrap"
             : "bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100"
@@ -1684,17 +1811,50 @@ function MessageBubble({ message }: { message: Message }) {
             ))}
           </div>
         )}
-        {!message.content ? (
+        {thinkContent && (
+          <details className="mb-3" open={thinkingInProgress}>
+            <summary className="text-xs text-amber-600 dark:text-amber-400 cursor-pointer hover:underline">
+              {thinkingInProgress ? "Thinking..." : "Thought process"}
+            </summary>
+            <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400 italic whitespace-pre-wrap leading-relaxed border-l-2 border-amber-300 dark:border-amber-800 pl-3">
+              {thinkContent}
+            </div>
+          </details>
+        )}
+        {!displayContent && !thinkingInProgress ? (
           <TypingDots />
         ) : isUser ? (
-          message.content
-        ) : (
-          <MarkdownContent content={message.content} />
+          displayContent
+        ) : displayContent ? (
+          <MarkdownContent content={displayContent} />
+        ) : null}
+        {/* Copy button — inside bubble, top-right, appears on hover */}
+        {message.content && (
+          <button
+            onClick={copyToClipboard}
+            className={`absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
+              isUser
+                ? "text-white/50 hover:text-white hover:bg-white/10"
+                : "text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            }`}
+            title="Copy to clipboard"
+          >
+            {copied ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            )}
+          </button>
         )}
       </div>
     </div>
   );
-}
+});
 
 function MarkdownContent({ content }: { content: string }) {
   return (

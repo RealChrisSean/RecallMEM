@@ -90,7 +90,7 @@ Get a free API key from [brave.com/search/api](https://brave.com/search/api) (pi
 
 **Web search worked yesterday but suddenly doesn't**
 
-Brave free tier resets monthly at 2,000 searches. You may have hit the cap. Either upgrade to the $3/month paid tier (20,000 searches) or wait until the month rolls over. The AI tells you which one happened when you try.
+Brave gives you $5 in free credits every month (~1,000 searches). You may have used them up. Credits reset monthly. If you need more, your card gets charged at $5/1,000 requests. The AI tells you what happened when the quota runs out.
 
 ## Where things live on disk
 

@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
       model?: string;
       providerId?: string;
       webSearch?: boolean;
+      thinking?: boolean;
     };
 
     if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
@@ -167,12 +168,32 @@ export async function POST(req: NextRequest) {
           },
         });
 
+        // Periodic save: every 3 seconds during streaming, save the partial
+        // response to the DB. If the user refreshes mid-stream, the chat
+        // shows whatever was saved instead of losing the whole message.
+        let lastSaveTime = Date.now();
+        const SAVE_INTERVAL_MS = 3000;
+
         try {
-          for await (const chunk of chatStream(llmMessages, { mode, model: body.model, providerId: body.providerId, webSearch: body.webSearch })) {
+          for await (const chunk of chatStream(llmMessages, { mode, model: body.model, providerId: body.providerId, webSearch: body.webSearch, thinking: body.thinking })) {
             if (chunk.delta) {
               assistantContent += chunk.delta;
               const data = JSON.stringify({ delta: chunk.delta });
               controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+
+              // Save partial response periodically so refreshes don't lose content
+              const now = Date.now();
+              if (now - lastSaveTime > SAVE_INTERVAL_MS) {
+                lastSaveTime = now;
+                const partialMessages: Message[] = [
+                  ...body.messages,
+                  { role: "assistant", content: assistantContent },
+                ];
+                updateChat(finalChatId, partialMessages, {
+                  model: body.model || null,
+                  providerId: body.providerId || null,
+                }).catch(() => {}); // fire-and-forget, don't block the stream
+              }
             }
             if (chunk.done) {
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));

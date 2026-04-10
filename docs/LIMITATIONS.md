@@ -16,7 +16,7 @@ This is v0.1. It works, used daily, but it's not "production ready" in the corpo
 
 **Web search works on Anthropic and Ollama. OpenAI not yet.**
 - Anthropic uses the native `web_search_20250305` tool, no setup.
-- Ollama (Gemma) uses **Brave Search** as a backend, which needs a free API key (5 minute setup): sign up at [brave.com/search/api](https://brave.com/search/api), pick the Free tier (2,000 searches/month), and paste the key into Settings → Web search.
+- Ollama (Gemma) uses **Brave Search** as a backend, which needs an API key (~5 minute setup): sign up at [brave.com/search/api](https://brave.com/search/api), pick the Search plan ($5/1,000 requests, includes $5 free credits every month so ~1,000 searches/month are free), and paste the key into Settings → Web search.
 - OpenAI's native web search requires the Responses API path which isn't plumbed through yet.
 
 **OpenAI vision isn't fully wired up.** Gemma 4 (4B and up) handles images natively via Ollama. OpenAI uses a different format that hasn't been plumbed through. Use Ollama or Anthropic for images.
