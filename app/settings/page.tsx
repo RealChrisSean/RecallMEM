@@ -8,6 +8,50 @@ import { MODEL_OPTIONS } from "@/lib/llm-config";
 
 export default function SettingsPage() {
   const [connectingService, setConnectingService] = useState<string | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<{
+    currentVersion: string;
+    latestVersion: string;
+    updateAvailable: boolean;
+  } | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateResult, setUpdateResult] = useState<string | null>(null);
+
+  // Check for updates on mount
+  useEffect(() => {
+    fetch("/api/update")
+      .then((r) => r.json())
+      .then((data: { currentVersion?: string; latestVersion?: string; updateAvailable?: boolean }) => {
+        if (data.currentVersion) {
+          setUpdateInfo({
+            currentVersion: data.currentVersion,
+            latestVersion: data.latestVersion || data.currentVersion,
+            updateAvailable: !!data.updateAvailable,
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  async function runUpdate() {
+    setUpdating(true);
+    setUpdateResult(null);
+    try {
+      const res = await fetch("/api/update", { method: "POST" });
+      const data = (await res.json()) as { ok: boolean; message: string; newVersion?: string };
+      setUpdateResult(data.message);
+      if (data.ok && data.newVersion) {
+        setUpdateInfo((prev) => prev ? {
+          ...prev,
+          currentVersion: data.newVersion!,
+          updateAvailable: false,
+        } : null);
+      }
+    } catch (err) {
+      setUpdateResult("Update failed. Try running 'npx recallmem upgrade' in your terminal.");
+    } finally {
+      setUpdating(false);
+    }
+  }
   const [braveKey, setBraveKey] = useState("");
   const [braveConfigured, setBraveConfigured] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
@@ -679,6 +723,78 @@ export default function SettingsPage() {
           );
         })()}
 
+        <section>
+          <h2 className="flex items-center justify-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider mb-3">
+            <UpdateIcon />
+            Updates
+          </h2>
+          <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+            {updateInfo ? (
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <div className="text-sm text-zinc-900 dark:text-zinc-100">
+                      Current version: <strong>v{updateInfo.currentVersion}</strong>
+                    </div>
+                    {updateInfo.updateAvailable && (
+                      <div className="text-sm text-emerald-600 dark:text-emerald-400 mt-1">
+                        v{updateInfo.latestVersion} available
+                      </div>
+                    )}
+                    {!updateInfo.updateAvailable && (
+                      <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                        You&apos;re on the latest version
+                      </div>
+                    )}
+                  </div>
+                  {updateInfo.updateAvailable ? (
+                    <button
+                      onClick={runUpdate}
+                      disabled={updating}
+                      className="px-4 py-2 text-sm font-medium rounded-md bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50"
+                    >
+                      {updating ? "Updating..." : "Update now"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        fetch("/api/update")
+                          .then((r) => r.json())
+                          .then((data: { currentVersion?: string; latestVersion?: string; updateAvailable?: boolean }) => {
+                            if (data.currentVersion) {
+                              setUpdateInfo({
+                                currentVersion: data.currentVersion,
+                                latestVersion: data.latestVersion || data.currentVersion,
+                                updateAvailable: !!data.updateAvailable,
+                              });
+                            }
+                          });
+                      }}
+                      className="px-4 py-2 text-sm font-medium rounded-md border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                    >
+                      Check for updates
+                    </button>
+                  )}
+                </div>
+                {updateResult && (
+                  <div className={`text-sm p-3 rounded-md mt-2 ${
+                    updateResult.includes("failed")
+                      ? "bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-400"
+                      : "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400"
+                  }`}>
+                    {updateResult}
+                  </div>
+                )}
+                <p className="text-xs text-zinc-500 dark:text-zinc-500 mt-3">
+                  Updates pull the latest code, install dependencies, and run database migrations. Your chats, memory, brains, and API keys are never affected.
+                </p>
+              </div>
+            ) : (
+              <div className="text-sm text-zinc-500">Loading...</div>
+            )}
+          </div>
+        </section>
+
         <AppFooter variant="page" />
       </div>
     </div>
@@ -722,6 +838,17 @@ function GlobeIcon() {
       <circle cx="12" cy="12" r="10" />
       <path d="M2 12h20" />
       <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  );
+}
+
+function UpdateIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+      <path d="M16 16h5v5" />
     </svg>
   );
 }

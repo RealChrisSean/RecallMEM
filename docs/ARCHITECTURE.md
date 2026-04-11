@@ -6,7 +6,7 @@ How the deterministic memory framework actually works. If you skimmed the README
 
 In ChatGPT and Claude.ai with memory turned on, the LLM itself is in charge of your memory. The model decides what to save, the model decides what to recall, the model is the one looking through your history. The problem: LLMs hallucinate. They forget. They retrieve the wrong thing on a bad run. You're trusting the model to remember accurately, and that's exactly the thing models are bad at.
 
-RecallMEM does it backwards. **The chat LLM never touches your memory database.** Not for reads, not for writes. The LLM only ever sees a system prompt that's already been assembled by deterministic TypeScript and SQL.
+RecallMEM does it backwards. **The LLM proposes, TypeScript decides.** On reads, the model never queries your database. TypeScript + SQL assembles the prompt before the model runs. On writes, an LLM proposes candidate facts, but it has zero authority over the database. TypeScript is the gatekeeper.
 
 ## System architecture
 
@@ -81,15 +81,15 @@ When you send a message:
 8. TypeScript template assembles all of it into a system prompt
 9. **Then** the chat LLM gets called, with the assembled context already in its prompt
 
-The chat LLM never queries the database. It can't decide what to retrieve. It can't pick which facts are relevant. It can't hallucinate a memory that doesn't exist, because if it's not in the prompt, it doesn't exist for the model. The retrieval is 100% deterministic SQL + cosine similarity. No LLM tool calls touching your memory store.
+The chat LLM never queries the database. It can't decide what to retrieve. It can't pick which facts are relevant at read time. It can't hallucinate a memory that doesn't exist in the assembled prompt, because retrieval is deterministic SQL + cosine similarity with TypeScript prompt assembly. No LLM tool calls are used for memory retrieval.
 
 ## The WRITE path (LLM proposes, TypeScript validates)
 
-After every assistant reply, a small local LLM (Gemma 4 E4B via Ollama) runs in the background to extract candidate facts from the running transcript. This happens fire-and-forget after the stream closes, so you never wait for it. It always uses the local model regardless of which provider the chat itself is using, so cloud users (Claude, GPT) don't get billed per turn for extraction.
+After every assistant reply, a small LLM runs in the background to extract **candidate facts** from the running transcript. This happens fire-and-forget after the stream closes, so you never wait for it. It always uses the local model regardless of which provider the chat itself is using, so cloud users (Claude, GPT) don't get billed per turn for extraction.
 
 The same LLM call also returns the IDs of any **existing** facts the new conversation contradicts. So when you say "I just left Acme to start a new job," the extractor returns the new fact AND flags the old "User works at Acme" fact for retirement. The TypeScript layer flips those rows to `is_active=false` and stamps `valid_to=NOW()`. History is preserved, the active set always reflects current truth.
 
-But here's the key: the LLM only **proposes** facts and supersession decisions. It cannot write to the database. The TypeScript layer is the actual gatekeeper, and it runs every candidate fact through six validation steps before storage:
+But here's the key: **the LLM proposes, TypeScript decides**. The model can suggest candidate facts and supersession decisions, but it cannot write to the database. The TypeScript layer is the gatekeeper, and it runs every candidate fact through six validation steps before storage:
 
 1. **Quality gate.** Conversations under 100 characters get zero facts extracted. The LLM never even sees them.
 2. **JSON parse validation.** If the LLM returns malformed JSON or no array, the entire batch is dropped.
@@ -143,7 +143,8 @@ This is the actual reason RecallMEM exists. Not "another local chat UI." A memor
 | | RecallMEM | ChatGPT / Claude.ai | Mem0 |
 |---|---|---|---|
 | **Runs locally** | ✅ | ❌ | ❌ |
-| **Memory retrieval is deterministic (no LLM tool calls)** | ✅ | ❌ | ❌ |
+| **Memory retrieval is deterministic (no LLM tool calls on read path)** | ✅ | ❌ | ❌ |
+| **Memory writes are TypeScript-gated (LLM proposes only)** | ✅ | ❌ | partial |
 | **Persistent memory across chats** | ✅ | partial | ✅ |
 | **Temporal awareness (memories know when they were true)** | ✅ | ❌ | ❌ |
 | **Auto-retires stale facts when truth changes** | ✅ | ❌ | ❌ |

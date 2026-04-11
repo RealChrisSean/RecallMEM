@@ -1,4 +1,7 @@
-import { query, queryOne, getUserId } from "@/lib/db";
+import { query, queryOne, getBaseUserId } from "@/lib/db";
+
+// Rules are shared across all brains.
+const getUserId = getBaseUserId;
 
 // Get the user's custom rules / instructions for the AI
 export async function getRules(): Promise<string> {

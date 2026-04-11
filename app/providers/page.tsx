@@ -34,7 +34,7 @@ const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
 const PRESET_HINTS: Record<ProviderType, string> = {
   ollama: "e.g. gemma4:26b, llama3:70b",
   anthropic: "e.g. claude-opus-4-6, claude-sonnet-4-6",
-  openai: "e.g. gpt-5, gpt-5-mini",
+  openai: "e.g. gpt-5.4, gpt-5.4-mini",
   "openai-compatible":
     "e.g. llama-3.3-70b-versatile, mixtral-8x22b, anthropic/claude-opus-4-6",
 };
@@ -57,15 +57,14 @@ const KNOWN_MODELS: Partial<Record<ProviderType, KnownModel[]>> = {
     { label: "Claude Haiku 4", apiId: "claude-haiku-4-20250514" },
   ],
   openai: [
-    { label: "GPT-5", apiId: "gpt-5" },
+    { label: "GPT-5.4", apiId: "gpt-5.4" },
+    { label: "GPT-5.4 Pro", apiId: "gpt-5.4-pro" },
+    { label: "GPT-5.4 Mini", apiId: "gpt-5.4-mini" },
+    { label: "GPT-5.4 Nano", apiId: "gpt-5.4-nano" },
     { label: "GPT-5 Mini", apiId: "gpt-5-mini" },
     { label: "GPT-5 Nano", apiId: "gpt-5-nano" },
+    { label: "GPT-5", apiId: "gpt-5" },
     { label: "GPT-4.1", apiId: "gpt-4.1" },
-    { label: "GPT-4o", apiId: "gpt-4o" },
-    { label: "GPT-4o Mini", apiId: "gpt-4o-mini" },
-    { label: "o4-mini (reasoning)", apiId: "o4-mini" },
-    { label: "o3 (reasoning)", apiId: "o3" },
-    { label: "o1 (reasoning)", apiId: "o1" },
   ],
 };
 

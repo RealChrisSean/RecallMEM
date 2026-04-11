@@ -4,14 +4,13 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "RecallMEM",
   description: "Private, local-first AI chatbot with persistent working memory",
+  other: {
+    // Theme init script injected via metadata so Next doesn't warn about
+    // <script> tags in server components. Runs before React hydrates to
+    // prevent flash-of-light-mode for dark users.
+    "theme-color": "#000000",
+  },
 };
-
-// Inline script that runs before React hydrates so the .dark class is on
-// <html> before the first paint. Prevents flash-of-light-mode for dark
-// users. Uses dangerouslySetInnerHTML on a raw <script> inside <head>
-// because Next 16 logs warnings for <Script> with inline children in
-// server component layouts.
-const themeInitScript = `(function(){try{var t=localStorage.getItem('recallmem.theme');if(!t){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}})();`;
 
 export default function RootLayout({
   children,
@@ -21,7 +20,13 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full antialiased" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+        <script
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('recallmem.theme');if(!t){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}if(t==='dark')document.documentElement.classList.add('dark');if(localStorage.getItem('recallmem.showBrainPicker')==='false')document.documentElement.classList.add('hide-brain-picker');}catch(e){}})();`,
+          }}
+        />
       </head>
       <body className="min-h-full flex flex-col font-sans">{children}</body>
     </html>

@@ -42,3 +42,10 @@ a {
   --color-zinc-900: #262624;
   --color-zinc-800: #30302e;
 }
+
+/* Hide brain picker before React hydrates to prevent flash.
+   The inline script in layout.tsx adds this class to <html> if
+   localStorage says the picker should be hidden. */
+.hide-brain-picker [data-brain-picker] {
+  display: none !important;
+}

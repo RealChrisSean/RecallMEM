@@ -107,7 +107,9 @@ export async function POST(req: NextRequest) {
       } else {
         providerType = "ollama"; // default local
       }
-      if (providerType === "ollama") {
+      if (providerType !== "anthropic") {
+        // All non-Anthropic providers use Brave for web search.
+        // Anthropic uses its own native web_search tool in lib/llm.ts.
         const webSpan = trace?.span({
           name: "web-search-brave",
           input: { query: latestUserMessage.content },
@@ -135,7 +137,13 @@ export async function POST(req: NextRequest) {
     const shouldMarkResume =
       chatLastUpdated && gapMs > RESUME_GAP_MS && body.messages.length > 1;
 
-    const baseMessages = body.messages.map((m) => ({ role: m.role, content: m.content }));
+    const baseMessages = body.messages
+      .filter((m) => m.content?.trim() || (m.images && m.images.length > 0))
+      .map((m) => ({
+        role: m.role,
+        content: m.content || "[image attached]",
+        ...(m.images && m.images.length > 0 ? { images: m.images } : {}),
+      }));
     let chatMessages: ChatMessage[];
     if (shouldMarkResume) {
       const dateStr = now.toISOString().slice(0, 10);

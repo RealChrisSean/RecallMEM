@@ -53,11 +53,37 @@ export function setUserIdResolver(
 }
 
 /**
- * Get the current user's ID. Used by all lib functions internally.
- * In single-user mode this just returns "local-user".
+ * Get the current user's ID, scoped to the active brain. Used by all
+ * lib functions internally. In single-user mode this returns
+ * "local-user" or "local-user::brain-name" if a brain is selected.
+ *
+ * The active brain is read from the `recallmem-brain` cookie set by
+ * the client. If no cookie is set or the brain is "default", uses
+ * the base user ID with no namespace.
  */
-export async function getUserId(): Promise<string> {
+/**
+ * Get the base user ID without brain namespace. Used for resources
+ * that should be shared across all brains (providers, settings, rules).
+ */
+export async function getBaseUserId(): Promise<string> {
   return _userIdResolver();
+}
+
+export async function getUserId(): Promise<string> {
+  const baseId = await _userIdResolver();
+  // Try to read the active brain from the cookie.
+  // This is safe to call in server components and API routes.
+  try {
+    const { cookies } = await import("next/headers");
+    const cookieStore = await cookies();
+    const brain = cookieStore.get("recallmem-brain")?.value;
+    if (brain && brain !== "default") {
+      return `${baseId}::${brain}`;
+    }
+  } catch {
+    // Not in a Next.js request context (CLI, scripts, etc). Skip.
+  }
+  return baseId;
 }
 
 /**

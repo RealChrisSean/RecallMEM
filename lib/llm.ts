@@ -100,17 +100,18 @@ export async function* chatStream(
   options: ChatOptions = {}
 ): AsyncGenerator<ChatStreamChunk> {
   const provider = await resolveProvider(options);
-  // Web search only works on cloud providers; Ollama silently ignores it
-  const webSearch = !!options.webSearch && provider.type !== "ollama";
+  // Native web search only works for Anthropic (web_search_20250305).
+  // OpenAI's chat completions doesn't support web_search_preview
+  // (that's Responses API only). Ollama, OpenAI, and OpenAI-compatible
+  // all use Brave search via the chat route instead.
+  const webSearch = !!options.webSearch && provider.type === "anthropic";
   const thinking = !!options.thinking;
   if (provider.type === "anthropic") {
     yield* anthropicStream(provider, messages, webSearch);
   } else if (provider.type === "ollama") {
     yield* ollamaStream(provider, messages, thinking);
   } else {
-    // OpenAI web search requires the Responses API or a search-enabled model;
-    // skipping for now so the toggle stays Anthropic-only.
-    yield* openaiStream(provider, messages);
+    yield* openaiStream(provider, messages, webSearch);
   }
 }
 
@@ -289,26 +290,41 @@ function openaiHeaders(provider: ResolvedProvider): Record<string, string> {
 function openaiBody(
   provider: ResolvedProvider,
   messages: ChatMessage[],
-  stream: boolean
+  stream: boolean,
+  webSearch = false
 ): string {
-  // OpenAI doesn't support multimodal images via the simple "images" field --
-  // they require the content array format. For now, skip images for OpenAI.
   return JSON.stringify({
     model: provider.model,
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    messages: messages.map((m) => {
+      if (m.images && m.images.length > 0) {
+        const content: Array<Record<string, unknown>> = [];
+        for (const img of m.images) {
+          content.push({
+            type: "image_url",
+            image_url: { url: `data:image/png;base64,${img}` },
+          });
+        }
+        if (m.content) {
+          content.push({ type: "text", text: m.content });
+        }
+        return { role: m.role, content };
+      }
+      return { role: m.role, content: m.content };
+    }),
     stream,
   });
 }
 
 async function* openaiStream(
   provider: ResolvedProvider,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
+  webSearch = false
 ): AsyncGenerator<ChatStreamChunk> {
   const url = `${provider.baseUrl.replace(/\/$/, "")}/v1/chat/completions`;
   const res = await fetch(url, {
     method: "POST",
     headers: openaiHeaders(provider),
-    body: openaiBody(provider, messages, true),
+    body: openaiBody(provider, messages, true, webSearch),
   });
   if (!res.ok || !res.body) {
     throw new Error(`OpenAI request failed: ${res.status} ${await res.text()}`);
@@ -389,7 +405,27 @@ function anthropicBody(
     model: provider.model,
     max_tokens: 4096,
     system: systemContent || undefined,
-    messages: chatMessages.map((m) => ({ role: m.role, content: m.content })),
+    messages: chatMessages.map((m) => {
+      // If the message has images, send as content blocks (Anthropic vision format)
+      if (m.images && m.images.length > 0) {
+        const content: Array<Record<string, unknown>> = [];
+        for (const img of m.images) {
+          content.push({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/png",
+              data: img,
+            },
+          });
+        }
+        if (m.content) {
+          content.push({ type: "text", text: m.content });
+        }
+        return { role: m.role, content };
+      }
+      return { role: m.role, content: m.content };
+    }),
     stream,
     ...(webSearch && {
       tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],

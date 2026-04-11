@@ -31,7 +31,7 @@
 
 A personal AI chatbot with REAL memory. Plug in any LLM you want and RecallMEM gives it persistent memory of who you are, what you've talked about, and what's currently true vs historical. All your memory is stored in a local Postgres database on your machine, with pgvector powering the semantic search across your past conversations.
 
-The best part is that the LLM will never touch your memory in the database. Every retrieval is deterministic SQL + cosine similarity, assembled by TypeScript before the LLM ever sees it. The LLM only proposes new facts; a TypeScript validator decides what gets stored. Facts have timestamps and get auto-retired when you contradict them ("works at Acme" → "left Acme"). [Deep dive on the architecture →](./docs/ARCHITECTURE.md)
+The best part is that **the LLM proposes, TypeScript decides.** Retrieval is deterministic SQL + cosine similarity, built by TypeScript before the model ever sees it. On the write side, an LLM proposes candidate facts and contradictions, but a 6-step TypeScript validator decides what actually gets stored. Facts have timestamps and get auto-retired when the truth changes ("works at Acme" → "left Acme"). [Deep dive on the architecture →](./docs/ARCHITECTURE.md)
 
 You can run it three ways:
 

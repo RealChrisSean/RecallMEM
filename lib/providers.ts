@@ -1,4 +1,9 @@
-import { query, queryOne, getUserId } from "@/lib/db";
+import { query, queryOne, getBaseUserId } from "@/lib/db";
+
+// Providers are shared across all brains. A user adds their Claude
+// API key once and every brain can use it. Uses getBaseUserId()
+// (no brain namespace) instead of getUserId().
+const getUserId = getBaseUserId;
 
 export type ProviderType =
   | "ollama"

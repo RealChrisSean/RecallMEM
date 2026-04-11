@@ -1,4 +1,7 @@
-import { query, queryOne, getUserId } from "@/lib/db";
+import { query, queryOne, getBaseUserId } from "@/lib/db";
+
+// Settings are shared across all brains (Brave key, etc).
+const getUserId = getBaseUserId;
 
 /**
  * Per-user key/value settings store. Used for things normal users need to

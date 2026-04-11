@@ -48,6 +48,7 @@ export default function ChatPage() {
   const [chatId, setChatId] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<ModelId>(DEFAULT_MODEL);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
+  const [selectedProviderModel, setSelectedProviderModel] = useState<string | null>(null);
   const [customProviders, setCustomProviders] = useState<ProviderListItem[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   // Parallel array holding the raw File objects for pending text/PDF uploads.
@@ -61,6 +62,158 @@ export default function ChatPage() {
   const [dontShowWebSearchWarning, setDontShowWebSearchWarning] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [privateMode, setPrivateMode] = useState(false);
+  const [showBrainPicker, setShowBrainPicker] = useState(true);
+
+  // Sync brain picker visibility from localStorage on mount.
+  // Uses a layout-blocking approach: inject a style tag immediately
+  // to hide the picker before React even paints.
+  useEffect(() => {
+    if (localStorage.getItem("recallmem.showBrainPicker") === "false") {
+      setShowBrainPicker(false);
+    }
+  }, []);
+
+  const [showBrainHint, setShowBrainHint] = useState(false);
+
+  // Cmd+Shift+H (Mac) / Ctrl+Shift+H (Windows) toggles brain picker visibility
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "h") {
+        e.preventDefault();
+        setShowBrainPicker((v) => {
+          const next = !v;
+          localStorage.setItem("recallmem.showBrainPicker", next ? "true" : "false");
+          // Update the CSS class so it takes effect immediately
+          if (next) {
+            document.documentElement.classList.remove("hide-brain-picker");
+          } else {
+            document.documentElement.classList.add("hide-brain-picker");
+            const muted = localStorage.getItem("recallmem.brainHintMuted");
+            if (!muted || Date.now() > Number(muted)) {
+              setShowBrainHint(true);
+            }
+          }
+          return next;
+        });
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, []);
+  const [activeBrain, setActiveBrain] = useState("default");
+  const [brains, setBrains] = useState<{ name: string; emoji: string }[]>([
+    { name: "default", emoji: "🧠" },
+  ]);
+
+  // Load brains from localStorage after mount to avoid hydration mismatch
+  useEffect(() => {
+    const saved = localStorage.getItem("recallmem.brains");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Migrate old string[] format
+          if (typeof parsed[0] === "string") {
+            setBrains(parsed.map((name: string, i: number) => ({
+              name,
+              emoji: ["🧠", "💼", "🏠", "🎯", "🔬", "📚", "💡", "🎨", "🚀", "🌍"][i] || "⭐",
+            })));
+          } else {
+            setBrains(parsed);
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    const savedBrain = localStorage.getItem("recallmem.activeBrain");
+    if (savedBrain) setActiveBrain(savedBrain);
+  }, []);
+
+  // Set the brain cookie + persist to localStorage whenever activeBrain changes
+  useEffect(() => {
+    document.cookie = `recallmem-brain=${activeBrain};path=/;max-age=31536000`;
+    localStorage.setItem("recallmem.activeBrain", activeBrain);
+    refreshChatList();
+  }, [activeBrain]);
+
+  // Persist brains list to localStorage
+  useEffect(() => {
+    localStorage.setItem("recallmem.brains", JSON.stringify(brains));
+  }, [brains]);
+
+  function addBrain(name: string) {
+    const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").trim();
+    if (!slug || brains.some((b) => b.name === slug)) return;
+
+    // Pick an emoji based on the brain name. Keywords map to relevant
+    // emojis. Falls back to a pool of unused emojis so they never repeat.
+    const KEYWORD_EMOJIS: Record<string, string> = {
+      work: "💼", job: "💼", career: "💼", office: "💼",
+      personal: "🏠", home: "🏠", family: "🏠", life: "🏠",
+      demo: "🎯", test: "🎯", showcase: "🎯",
+      study: "📚", learn: "📚", school: "📚", education: "📚",
+      code: "💻", dev: "💻", coding: "💻", programming: "💻",
+      research: "🔬", science: "🔬", explore: "🔬",
+      creative: "🎨", art: "🎨", design: "🎨", write: "🎨", writing: "✍️",
+      health: "❤️", fitness: "💪", gym: "💪", medical: "❤️",
+      finance: "💰", money: "💰", invest: "📈", budget: "💰",
+      travel: "✈️", trip: "✈️", vacation: "🌴",
+      music: "🎵", podcast: "🎙️", video: "🎬", content: "🎬",
+      legal: "⚖️", law: "⚖️", lawyer: "⚖️",
+      startup: "🚀", business: "🚀", project: "🚀",
+      social: "💬", friends: "👥", dating: "💝",
+      gaming: "🎮", game: "🎮",
+      food: "🍕", cooking: "👨‍🍳", recipe: "🍕",
+      spanish: "🇪🇸", french: "🇫🇷", japanese: "🇯🇵", language: "🗣️",
+    };
+    const FALLBACK_EMOJIS = [
+      "⭐", "🌟", "💡", "🔮", "🎪", "🌈", "🦊", "🐝",
+      "🍀", "🔥", "💎", "🎲", "🧩", "🌙", "☀️", "🏔️",
+    ];
+
+    const usedEmojis = new Set(brains.map((b) => b.emoji));
+    let emoji = "";
+
+    // Try keyword match first
+    for (const [keyword, e] of Object.entries(KEYWORD_EMOJIS)) {
+      if (slug.includes(keyword) && !usedEmojis.has(e)) {
+        emoji = e;
+        break;
+      }
+    }
+
+    // Fall back to first unused emoji from the pool
+    if (!emoji) {
+      emoji = FALLBACK_EMOJIS.find((e) => !usedEmojis.has(e)) || "🧠";
+    }
+
+    setBrains((prev) => [...prev, { name: slug, emoji }]);
+    setActiveBrain(slug);
+  }
+
+  function switchBrain(slug: string) {
+    setActiveBrain(slug);
+    setMessages([]);
+    setChatId(null);
+  }
+
+  function deleteBrain(slug: string) {
+    if (slug === "default") return; // can't delete default
+    if (!confirm(`Delete the "${slug}" brain? All its chats and memory will remain in the database but won't be accessible from the UI.`)) return;
+    setBrains((prev) => prev.filter((b) => b.name !== slug));
+    if (activeBrain === slug) switchBrain("default");
+  }
+
+  function renameBrain(slug: string) {
+    if (slug === "default") return;
+    const newName = prompt(`Rename "${slug}" to:`, slug);
+    if (!newName || newName === slug) return;
+    const newSlug = newName.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").trim();
+    if (!newSlug || brains.some((b) => b.name === newSlug)) return;
+    setBrains((prev) =>
+      prev.map((b) => (b.name === slug ? { ...b, name: newSlug } : b))
+    );
+    if (activeBrain === slug) setActiveBrain(newSlug);
+  }
   // Installed Ollama models. Used to detect when the user picks one from
   // the dropdown that hasn't been pulled yet, so we can offer to download.
   const [installedOllamaModels, setInstalledOllamaModels] = useState<Set<string>>(
@@ -238,19 +391,25 @@ export default function ChatPage() {
   }
 
   // Load the saved model selection on mount.
-  // Encoded as "ollama:<modelId>" or "provider:<providerId>"
+  // Format: "ollama:<modelId>" or "provider:<providerId>::<modelId>"
   useEffect(() => {
     const saved = localStorage.getItem(MODEL_STORAGE_KEY);
     if (!saved) return;
     if (saved.startsWith("provider:")) {
-      setSelectedProviderId(saved.slice("provider:".length));
+      const rest = saved.slice("provider:".length);
+      const sep = rest.indexOf("::");
+      if (sep !== -1) {
+        setSelectedProviderId(rest.slice(0, sep));
+        setSelectedProviderModel(rest.slice(sep + 2));
+      } else {
+        setSelectedProviderId(rest);
+      }
     } else if (saved.startsWith("ollama:")) {
       const id = saved.slice("ollama:".length);
       if (MODEL_OPTIONS.some((m) => m.id === id)) {
         setSelectedModel(id as ModelId);
       }
     } else if (MODEL_OPTIONS.some((m) => m.id === saved)) {
-      // Backward compat with old format
       setSelectedModel(saved as ModelId);
     }
   }, []);
@@ -258,11 +417,12 @@ export default function ChatPage() {
   // Persist model selection
   useEffect(() => {
     if (selectedProviderId) {
-      localStorage.setItem(MODEL_STORAGE_KEY, `provider:${selectedProviderId}`);
+      const model = selectedProviderModel ? `::${selectedProviderModel}` : "";
+      localStorage.setItem(MODEL_STORAGE_KEY, `provider:${selectedProviderId}${model}`);
     } else {
       localStorage.setItem(MODEL_STORAGE_KEY, `ollama:${selectedModel}`);
     }
-  }, [selectedModel, selectedProviderId]);
+  }, [selectedModel, selectedProviderId, selectedProviderModel]);
 
   // Close modals on Escape key
   useEffect(() => {
@@ -274,6 +434,7 @@ export default function ChatPage() {
         setShowWebSearchWarning(false);
         setDontShowWebSearchWarning(false);
         setIsDragging(false);
+        setShowBrainHint(false);
       }
     };
     window.addEventListener("keydown", handleEsc);
@@ -636,8 +797,10 @@ export default function ChatPage() {
       messageContent += `${header}--- ${file.name} ---\n${content}\n--- end ${file.name} ---`;
     }
 
+    // Anthropic requires non-empty content on every message.
+    // If only images with no typed text, use a minimal prompt.
     if (!messageContent && images.length > 0) {
-      messageContent = "What do you see in this image?";
+      messageContent = "[image attached]";
     }
 
     const userMessage: Message = {
@@ -667,7 +830,7 @@ export default function ChatPage() {
           mode,
           chatId,
           ...(selectedProviderId
-            ? { providerId: selectedProviderId }
+            ? { providerId: selectedProviderId, model: selectedProviderModel || undefined }
             : { model: selectedModel }),
           webSearch,
           thinking: thinkingEnabled,
@@ -866,6 +1029,13 @@ export default function ChatPage() {
         onNewChat={newChat}
         isStreaming={isStreaming}
         isFinalizing={isFinalizing}
+        activeBrain={activeBrain}
+        brains={brains}
+        onSwitchBrain={switchBrain}
+        onAddBrain={addBrain}
+        onDeleteBrain={deleteBrain}
+        onRenameBrain={renameBrain}
+        showBrainPicker={showBrainPicker}
       />
 
       {/* Main column */}
@@ -906,8 +1076,12 @@ export default function ChatPage() {
           <ModelPicker
             modelId={selectedModel}
             providerId={selectedProviderId}
+            selectedModel={selectedProviderModel}
             onSelectOllama={handleOllamaSelect}
-            onSelectProvider={(id) => setSelectedProviderId(id)}
+            onSelectProvider={(id, model) => {
+              setSelectedProviderId(id);
+              setSelectedProviderModel(model || null);
+            }}
             customProviders={customProviders}
             disabled={isStreaming || isFinalizing}
           />
@@ -1069,50 +1243,41 @@ export default function ChatPage() {
             </div>
           )}
 
-          <div className="relative">
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept="image/*,.pdf,.txt,.md,.json,.csv,.yaml,.yml,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.c,.cpp,.cs,.php,.swift,.sh,.sql,.html,.css"
-              onChange={handleFileInputChange}
-              className="hidden"
-            />
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/*,.pdf,.txt,.md,.json,.csv,.yaml,.yml,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.c,.cpp,.cs,.php,.swift,.sh,.sql,.html,.css"
+            onChange={handleFileInputChange}
+            className="hidden"
+          />
+          <div className="flex items-center gap-1 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2 focus-within:ring-2 focus-within:ring-zinc-300 dark:focus-within:ring-zinc-700">
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={isStreaming}
-              className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="flex-shrink-0 w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               title="Attach file"
             >
               <PaperclipIcon />
             </button>
             {(() => {
               const sel = customProviders.find((p) => p.id === selectedProviderId);
-              // Show for Anthropic (native tool) and for local Ollama
-              // (we proxy via Brave). OpenAI not wired yet.
-              const isLocal = !selectedProviderId; // built-in local model
+              const isLocal = !selectedProviderId;
               const isAnthropic = sel?.type === "anthropic";
               const isOllamaCustom = sel?.type === "ollama";
-              const supportsWebSearch = isAnthropic || isLocal || isOllamaCustom;
+              const supportsWebSearch = isAnthropic || isLocal || isOllamaCustom || sel?.type === "openai" || sel?.type === "openai-compatible";
               if (!supportsWebSearch) return null;
               const isThirdParty = isLocal || isOllamaCustom;
               return (
-                <div className="absolute left-11 top-1/2 -translate-y-1/2 group">
+                <div className="flex-shrink-0 group relative">
                   <button
                     type="button"
                     onClick={() => {
                       if (!webSearch) {
-                        // Turning ON. For local providers, show the privacy
-                        // warning the first time only.
                         if (isThirdParty) {
-                          const acknowledged = localStorage.getItem(
-                            "recallmem.webSearchAcknowledged"
-                          );
-                          if (!acknowledged) {
-                            setShowWebSearchWarning(true);
-                            return;
-                          }
+                          const acknowledged = localStorage.getItem("recallmem.webSearchAcknowledged");
+                          if (!acknowledged) { setShowWebSearchWarning(true); return; }
                         }
                         setWebSearch(true);
                       } else {
@@ -1134,23 +1299,12 @@ export default function ChatPage() {
                   </button>
                   <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 text-[10px] font-medium leading-snug rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-md z-50">
                     {webSearch
-                      ? isThirdParty
-                        ? "Web search on - queries go to Brave"
-                        : "Web search on - Claude can browse the web"
-                      : isThirdParty
-                        ? "Web search off - click to enable (uses Brave)"
-                        : "Web search off - click to let Claude browse the web"}
+                      ? isThirdParty ? "Web search on - queries go to Brave" : "Web search on"
+                      : isThirdParty ? "Web search off - click to enable (uses Brave)" : "Web search off"}
                   </span>
                 </div>
               );
             })()}
-            {/* Thinking toggle — disabled for now. With long chat contexts,
-                thinking mode can cause Ollama to spend minutes reasoning
-                before producing any visible tokens, which jams the single-
-                request queue and blocks all subsequent requests. Re-enable
-                once we add: (1) a timeout on thinking requests, (2) context
-                trimming for think mode, (3) streaming thinking tokens
-                through the typewriter correctly. */}
             <textarea
               ref={inputRef}
               value={input}
@@ -1159,19 +1313,13 @@ export default function ChatPage() {
               placeholder={noChatBackend ? "Set up a model first ↑" : "Ask me anything"}
               rows={1}
               disabled={noChatBackend}
-              className={`w-full resize-none rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ${
-                (() => {
-                  const sel = customProviders.find((p) => p.id === selectedProviderId);
-                  const showsGlobe = sel?.type === "anthropic" || sel?.type === "ollama" || !selectedProviderId;
-                  return showsGlobe ? "pl-20" : "pl-12";
-                })()
-              } pr-12 py-3 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700 disabled:opacity-50`}
+              className="flex-1 resize-none bg-transparent py-3 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none disabled:opacity-50"
             />
             {isStreaming ? (
               <button
                 type="button"
                 onClick={stopStreaming}
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center hover:bg-red-700 transition-colors"
+                className="flex-shrink-0 w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center hover:bg-red-700 transition-colors"
                 title="Stop generating"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
@@ -1182,7 +1330,7 @@ export default function ChatPage() {
               <button
                 type="submit"
                 disabled={(!input.trim() && attachedFiles.length === 0) || noChatBackend}
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
+                className="flex-shrink-0 w-8 h-8 rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
               >
                 <ArrowUpIcon />
               </button>
@@ -1205,6 +1353,46 @@ export default function ChatPage() {
             <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
               Images, PDFs, text, code
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Brain picker hidden hint */}
+      {showBrainHint && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowBrainHint(false)}>
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-6 py-5 max-w-xs text-center shadow-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
+              Brain picker hidden
+            </div>
+            <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-4">
+              To show it again, press:
+            </p>
+            <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-xs font-mono text-zinc-900 dark:text-zinc-100">
+              {typeof navigator !== "undefined" && /Mac/.test(navigator.platform) ? "⌘" : "Ctrl"} + Shift + H
+            </div>
+            <label className="flex items-center justify-center gap-2 mt-4 text-xs text-zinc-500 dark:text-zinc-400 cursor-pointer">
+              <input
+                type="checkbox"
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    localStorage.setItem(
+                      "recallmem.brainHintMuted",
+                      String(Date.now() + 7 * 24 * 60 * 60 * 1000)
+                    );
+                  } else {
+                    localStorage.removeItem("recallmem.brainHintMuted");
+                  }
+                }}
+                className="w-3.5 h-3.5 rounded cursor-pointer"
+              />
+              Don&apos;t show this for 7 days
+            </label>
+            <button
+              onClick={() => setShowBrainHint(false)}
+              className="block w-full mt-3 px-4 py-2 text-xs font-medium rounded-md bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
+            >
+              Got it
+            </button>
           </div>
         </div>
       )}
@@ -1396,6 +1584,13 @@ function Sidebar({
   onNewChat,
   isStreaming,
   isFinalizing,
+  activeBrain,
+  brains,
+  onSwitchBrain,
+  onAddBrain,
+  onDeleteBrain,
+  onRenameBrain,
+  showBrainPicker,
 }: {
   open: boolean;
   onClose: () => void;
@@ -1407,6 +1602,13 @@ function Sidebar({
   onNewChat: () => void;
   isStreaming: boolean;
   isFinalizing: boolean;
+  activeBrain: string;
+  brains: { name: string; emoji: string }[];
+  onSwitchBrain: (slug: string) => void;
+  onAddBrain: (name: string) => void;
+  onDeleteBrain: (slug: string) => void;
+  onRenameBrain: (slug: string) => void;
+  showBrainPicker: boolean;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMode, setSearchMode] = useState<"vector" | "text">("vector");
@@ -1491,6 +1693,19 @@ function Sidebar({
         </button>
       </div>
 
+      {/* Brain picker — Cmd+Shift+H to toggle visibility.
+          Uses CSS hidden instead of conditional render to avoid flash on refresh. */}
+      <div data-brain-picker className={showBrainPicker ? "" : "hidden"}>
+        <BrainPicker
+          brains={brains}
+          activeBrain={activeBrain}
+          onSwitch={onSwitchBrain}
+          onAdd={onAddBrain}
+          onRename={onRenameBrain}
+          onDelete={onDeleteBrain}
+        />
+      </div>
+
       {/* Search */}
       <div className="px-2 pb-2 space-y-1.5">
         <div className="relative">
@@ -1553,6 +1768,16 @@ function Sidebar({
                       onClick={() => onLoadChat(chat.id)}
                       onDelete={() => onDeleteChat(chat.id)}
                       onTogglePin={() => onTogglePin(chat.id, chat.is_pinned)}
+                      onRename={() => {
+                        const newTitle = prompt("Rename chat:", chat.title || "");
+                        if (newTitle) {
+                          fetch(`/api/chats/${chat.id}`, {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ title: newTitle }),
+                          }).then(() => window.location.reload());
+                        }
+                      }}
                       disabled={isStreaming || isFinalizing}
                     />
                   ))}
@@ -1573,6 +1798,16 @@ function Sidebar({
                       onClick={() => onLoadChat(chat.id)}
                       onDelete={() => onDeleteChat(chat.id)}
                       onTogglePin={() => onTogglePin(chat.id, chat.is_pinned)}
+                      onRename={() => {
+                        const newTitle = prompt("Rename chat:", chat.title || "");
+                        if (newTitle) {
+                          fetch(`/api/chats/${chat.id}`, {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ title: newTitle }),
+                          }).then(() => window.location.reload());
+                        }
+                      }}
                       disabled={isStreaming || isFinalizing}
                     />
                   ))}
@@ -1595,6 +1830,7 @@ function ChatListRow({
   onClick,
   onDelete,
   onTogglePin,
+  onRename,
   disabled,
 }: {
   chat: ChatListItem;
@@ -1602,6 +1838,7 @@ function ChatListRow({
   onClick: () => void;
   onDelete: () => void;
   onTogglePin: () => void;
+  onRename: () => void;
   disabled: boolean;
 }) {
   return (
@@ -1720,6 +1957,96 @@ function groupChatsByDate(chats: ChatListItem[]): {
   return Object.entries(groups)
     .filter(([, list]) => list.length > 0)
     .map(([label, chats]) => ({ label, chats }));
+}
+
+function BrainPicker({
+  brains,
+  activeBrain,
+  onSwitch,
+  onAdd,
+  onRename,
+  onDelete,
+}: {
+  brains: { name: string; emoji: string }[];
+  activeBrain: string;
+  onSwitch: (slug: string) => void;
+  onAdd: (name: string) => void;
+  onRename: (slug: string) => void;
+  onDelete: (slug: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const active = brains.find((b) => b.name === activeBrain) || brains[0];
+
+  return (
+    <div className="px-2 pb-2 relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-2 py-1.5 text-xs rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+      >
+        <span>
+          {active.emoji} {active.name === "default" ? "Default Brain" : active.name.charAt(0).toUpperCase() + active.name.slice(1)}
+        </span>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-2 right-2 top-full mt-1 z-50 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-lg overflow-hidden">
+            {brains.map((b) => (
+              <div
+                key={b.name}
+                className={`group flex items-center justify-between px-2 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer ${
+                  b.name === activeBrain ? "bg-zinc-50 dark:bg-zinc-800 font-medium" : ""
+                }`}
+              >
+                <button
+                  className="flex-1 text-left text-zinc-700 dark:text-zinc-300"
+                  onClick={() => { onSwitch(b.name); setOpen(false); }}
+                >
+                  {b.emoji} {b.name === "default" ? "Default Brain" : b.name.charAt(0).toUpperCase() + b.name.slice(1)}
+                </button>
+                {b.name !== "default" && (
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onRename(b.name); }}
+                      className="p-1 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+                      title="Rename"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onDelete(b.name); setOpen(false); }}
+                      className="p-1 rounded text-zinc-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+                      title="Delete"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 6h18" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+            <button
+              onClick={() => {
+                const name = prompt("Name for the new brain:");
+                if (name) { onAdd(name); setOpen(false); }
+              }}
+              className="w-full text-left px-2 py-2 text-xs text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 border-t border-zinc-100 dark:border-zinc-800"
+            >
+              + New brain...
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 function SidebarIcon() {
@@ -2065,9 +2392,31 @@ function ModeToggle({
   );
 }
 
+// Known models per provider type. One API key unlocks all models
+// in the group. User picks any model from the dropdown.
+const PROVIDER_MODELS: Record<string, { label: string; apiId: string }[]> = {
+  anthropic: [
+    { label: "Claude Opus 4.6", apiId: "claude-opus-4-6" },
+    { label: "Claude Sonnet 4.6", apiId: "claude-sonnet-4-6" },
+    { label: "Claude Haiku 4.5", apiId: "claude-haiku-4-5-20251001" },
+    { label: "Claude Opus 4.5", apiId: "claude-opus-4-5" },
+    { label: "Claude Sonnet 4.5", apiId: "claude-sonnet-4-5" },
+  ],
+  openai: [
+    { label: "GPT-5.4", apiId: "gpt-5.4" },
+    { label: "GPT-5.4 Pro", apiId: "gpt-5.4-pro" },
+    { label: "GPT-5.4 Mini", apiId: "gpt-5.4-mini" },
+    { label: "GPT-5.4 Nano", apiId: "gpt-5.4-nano" },
+    { label: "GPT-5", apiId: "gpt-5" },
+    { label: "GPT-5 Mini", apiId: "gpt-5-mini" },
+    { label: "GPT-4.1", apiId: "gpt-4.1" },
+  ],
+};
+
 function ModelPicker({
   modelId,
   providerId,
+  selectedModel,
   onSelectOllama,
   onSelectProvider,
   customProviders,
@@ -2075,13 +2424,15 @@ function ModelPicker({
 }: {
   modelId: ModelId;
   providerId: string | null;
+  selectedModel: string | null;
   onSelectOllama: (id: ModelId) => void;
-  onSelectProvider: (id: string) => void;
+  onSelectProvider: (id: string, model?: string) => void;
   customProviders: ProviderListItem[];
   disabled: boolean;
 }) {
-  // Encode current selection as a string for the <select>
-  const value = providerId ? `provider:${providerId}` : `ollama:${modelId}`;
+  const value = providerId
+    ? `provider:${providerId}::${selectedModel || ""}`
+    : `ollama:${modelId}`;
 
   function handleChange(v: string) {
     if (v === "__add_provider__") {
@@ -2089,9 +2440,25 @@ function ModelPicker({
       return;
     }
     if (v.startsWith("provider:")) {
-      onSelectProvider(v.slice("provider:".length));
+      const rest = v.slice("provider:".length);
+      const sep = rest.indexOf("::");
+      if (sep !== -1) {
+        const id = rest.slice(0, sep);
+        const model = rest.slice(sep + 2);
+        onSelectProvider(id, model);
+      } else {
+        onSelectProvider(rest);
+      }
     } else if (v.startsWith("ollama:")) {
       onSelectOllama(v.slice("ollama:".length) as ModelId);
+    }
+  }
+
+  // Group providers by type. One API key = one optgroup with all models.
+  const providersByType = new Map<string, ProviderListItem>();
+  for (const p of customProviders) {
+    if (!providersByType.has(p.type)) {
+      providersByType.set(p.type, p);
     }
   }
 
@@ -2111,15 +2478,32 @@ function ModelPicker({
             </option>
           ))}
         </optgroup>
-        {customProviders.length > 0 && (
-          <optgroup label="Custom providers">
-            {customProviders.map((p) => (
-              <option key={p.id} value={`provider:${p.id}`}>
-                {p.label}
+        {Array.from(providersByType.entries()).map(([type, provider]) => {
+          const knownModels = PROVIDER_MODELS[type];
+          const label = type === "anthropic" ? "Anthropic (Claude)"
+            : type === "openai" ? "OpenAI (GPT)"
+            : type === "openai-compatible" ? provider.label
+            : type;
+          if (knownModels && knownModels.length > 0) {
+            return (
+              <optgroup key={type} label={label}>
+                {knownModels.map((m) => (
+                  <option key={m.apiId} value={`provider:${provider.id}::${m.apiId}`}>
+                    {m.label}
+                  </option>
+                ))}
+              </optgroup>
+            );
+          }
+          // OpenAI-compatible or unknown type: show the single saved model
+          return (
+            <optgroup key={provider.id} label={label}>
+              <option value={`provider:${provider.id}::${provider.model}`}>
+                {provider.label}
               </option>
-            ))}
-          </optgroup>
-        )}
+            </optgroup>
+          );
+        })}
         <optgroup label="">
           <option value="__add_provider__">+ Add provider...</option>
         </optgroup>
