@@ -27,16 +27,53 @@ export async function GET() {
     );
     const currentVersion = pkg.version;
 
-    // Check latest version from GitHub tags
+    // Check releases from GitHub — includes changelogs
     const res = await fetch(
-      "https://api.github.com/repos/RealChrisSean/RecallMEM/tags?per_page=1",
+      "https://api.github.com/repos/RealChrisSean/RecallMEM/releases?per_page=20",
       { headers: { "User-Agent": "RecallMEM" } }
     );
+
     let latestVersion = currentVersion;
+    const changelog: { version: string; date: string; notes: string }[] = [];
+
     if (res.ok) {
-      const tags = (await res.json()) as Array<{ name: string }>;
-      if (tags.length > 0) {
-        latestVersion = tags[0].name.replace(/^v/, "");
+      const releases = (await res.json()) as Array<{
+        tag_name: string;
+        name: string;
+        body: string;
+        published_at: string;
+        draft: boolean;
+        prerelease: boolean;
+      }>;
+
+      const stable = releases.filter((r) => !r.draft && !r.prerelease);
+      if (stable.length > 0) {
+        latestVersion = stable[0].tag_name.replace(/^v/, "");
+      }
+
+      // Collect all versions between current and latest
+      for (const release of stable) {
+        const ver = release.tag_name.replace(/^v/, "");
+        if (ver <= currentVersion) break;
+        changelog.push({
+          version: ver,
+          date: release.published_at?.slice(0, 10) || "",
+          notes: release.body || release.name || "",
+        });
+      }
+    }
+
+    // Fallback to tags if no releases exist
+    if (latestVersion === currentVersion && changelog.length === 0) {
+      const tagRes = await fetch(
+        "https://api.github.com/repos/RealChrisSean/RecallMEM/tags?per_page=1",
+        { headers: { "User-Agent": "RecallMEM" } }
+      );
+      if (tagRes.ok) {
+        const tags = (await tagRes.json()) as Array<{ name: string }>;
+        if (tags.length > 0) {
+          latestVersion = tags[0].name.replace(/^v/, "");
+        }
       }
     }
 
@@ -46,6 +83,7 @@ export async function GET() {
       currentVersion,
       latestVersion,
       updateAvailable,
+      changelog,
     });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, 500);

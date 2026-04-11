@@ -12,6 +12,7 @@ export default function SettingsPage() {
     currentVersion: string;
     latestVersion: string;
     updateAvailable: boolean;
+    changelog: { version: string; date: string; notes: string }[];
   } | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateResult, setUpdateResult] = useState<string | null>(null);
@@ -20,12 +21,13 @@ export default function SettingsPage() {
   useEffect(() => {
     fetch("/api/update")
       .then((r) => r.json())
-      .then((data: { currentVersion?: string; latestVersion?: string; updateAvailable?: boolean }) => {
+      .then((data: { currentVersion?: string; latestVersion?: string; updateAvailable?: boolean; changelog?: { version: string; date: string; notes: string }[] }) => {
         if (data.currentVersion) {
           setUpdateInfo({
             currentVersion: data.currentVersion,
             latestVersion: data.latestVersion || data.currentVersion,
             updateAvailable: !!data.updateAvailable,
+            changelog: data.changelog || [],
           });
         }
       })
@@ -52,6 +54,62 @@ export default function SettingsPage() {
       setUpdating(false);
     }
   }
+  // TTS + STT settings
+  const [ttsProvider, setTtsProvider] = useState("auto");
+  const [ttsVoice, setTtsVoice] = useState("");
+  const [sttProvider, setSttProvider] = useState("whisper");
+  const [ttsAvailable, setTtsAvailable] = useState<{ xai: boolean; openai: boolean; deepgram: boolean; browser: boolean }>({ xai: false, openai: false, deepgram: false, browser: true });
+  const [ttsVoices, setTtsVoices] = useState<Record<string, string[]>>({});
+  const [ttsSaved, setTtsSaved] = useState(false);
+  const [deepgramKey, setDeepgramKey] = useState("");
+  const [deepgramConfigured, setDeepgramConfigured] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/tts")
+      .then((r) => r.json())
+      .then((d: { available: { xai: boolean; openai: boolean; deepgram: boolean; browser: boolean }; voices: Record<string, string[]>; settings: { provider: string; voice: string | null; sttProvider: string } }) => {
+        setTtsAvailable(d.available);
+        setTtsVoices(d.voices);
+        setTtsProvider(d.settings.provider || "auto");
+        setTtsVoice(d.settings.voice || "");
+        setSttProvider(d.settings.sttProvider || "whisper");
+        setDeepgramConfigured(d.available.deepgram);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function saveDeepgramKey() {
+    if (!deepgramKey.trim()) return;
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "deepgram_api_key", value: deepgramKey.trim() }),
+    });
+    setDeepgramConfigured(true);
+    setDeepgramKey("");
+    setTtsAvailable((prev) => ({ ...prev, deepgram: true }));
+  }
+
+  async function saveVoiceSettings() {
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "tts_provider", value: ttsProvider === "auto" ? "" : ttsProvider }),
+    });
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "tts_voice", value: ttsVoice }),
+    });
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "stt_provider", value: sttProvider }),
+    });
+    setTtsSaved(true);
+    setTimeout(() => setTtsSaved(false), 2000);
+  }
+
   const [braveKey, setBraveKey] = useState("");
   const [braveConfigured, setBraveConfigured] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
@@ -316,6 +374,8 @@ export default function SettingsPage() {
           </Link>
         </div>
 
+        <UsageSection />
+
         <section>
           <h2 className="flex items-center justify-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider mb-3">
             <ModelsIcon />
@@ -498,6 +558,159 @@ export default function SettingsPage() {
 
             <p className="text-xs text-zinc-500 dark:text-zinc-500 mt-4 leading-relaxed">
               The key is stored locally in your Postgres database. It never leaves your machine. Your message text gets sent to Brave when you have web search toggled on, but your memory, profile, facts, and past conversations stay local.
+            </p>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="flex items-center justify-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider mb-3">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+            </svg>
+            Voice
+          </h2>
+          <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 space-y-6">
+
+            {/* Deepgram API key */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+                Deepgram API Key
+              </label>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
+                Deepgram offers high-quality STT and TTS. Get a key at{" "}
+                <a href="https://console.deepgram.com" target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 underline">console.deepgram.com</a>
+                {" "}($200 free credits included).
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={deepgramKey}
+                  onChange={(e) => setDeepgramKey(e.target.value)}
+                  placeholder={deepgramConfigured ? "••••••••  (paste a new key to replace)" : "Paste your Deepgram API key"}
+                  className="flex-1 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100"
+                />
+                <button
+                  onClick={saveDeepgramKey}
+                  disabled={!deepgramKey.trim()}
+                  className="px-4 py-2 text-sm font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors disabled:opacity-40"
+                >
+                  Save
+                </button>
+              </div>
+              {deepgramConfigured && (
+                <p className="text-xs text-green-600 dark:text-green-400 mt-1">Deepgram key configured</p>
+              )}
+            </div>
+
+            <hr className="border-zinc-200 dark:border-zinc-800" />
+
+            {/* Text-to-Speech */}
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3">Text-to-Speech</h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
+                Click the speaker icon on any AI response to hear it read aloud.
+                {!ttsAvailable.xai && !ttsAvailable.openai && !ttsAvailable.deepgram && (
+                  <span className="block mt-1 text-amber-600 dark:text-amber-400 font-medium">
+                    No TTS provider detected. Add an OpenAI, xAI, or Deepgram API key to enable high-quality voices.
+                  </span>
+                )}
+              </p>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+                    Provider
+                  </label>
+                  <select
+                    value={ttsProvider}
+                    onChange={(e) => { setTtsProvider(e.target.value); setTtsVoice(""); }}
+                    className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100"
+                  >
+                    <option value="auto">Auto (cheapest available)</option>
+                    <option value="xai" disabled={!ttsAvailable.xai}>xAI Grok ($4.20/1M chars){!ttsAvailable.xai ? " -- no API key" : ""}</option>
+                    <option value="deepgram" disabled={!ttsAvailable.deepgram}>Deepgram Aura-2 ($30/1M chars){!ttsAvailable.deepgram ? " -- no API key" : ""}</option>
+                    <option value="openai" disabled={!ttsAvailable.openai}>OpenAI HD ($30/1M chars){!ttsAvailable.openai ? " -- no API key" : ""}</option>
+                    <option value="browser">Browser built-in (free, private, robotic)</option>
+                  </select>
+                </div>
+
+                {ttsProvider !== "browser" && (ttsAvailable.xai || ttsAvailable.openai || ttsAvailable.deepgram) && (
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+                      Voice
+                    </label>
+                    <select
+                      value={ttsVoice}
+                      onChange={(e) => setTtsVoice(e.target.value)}
+                      className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100"
+                    >
+                      <option value="">Default</option>
+                      {ttsProvider === "xai" && ttsVoices.xai?.map((v) => (
+                        <option key={v} value={v}>{v}</option>
+                      ))}
+                      {ttsProvider === "openai" && ttsVoices.openai?.map((v) => (
+                        <option key={v} value={v}>{v}</option>
+                      ))}
+                      {ttsProvider === "deepgram" && ttsVoices.deepgram?.map((v) => (
+                        <option key={v} value={v}>{v.replace("aura-2-", "").replace("-en", "")}</option>
+                      ))}
+                      {ttsProvider === "auto" && (
+                        <>
+                          {ttsAvailable.xai && <optgroup label="xAI Grok">
+                            {ttsVoices.xai?.map((v) => <option key={`xai-${v}`} value={v}>{v}</option>)}
+                          </optgroup>}
+                          {ttsAvailable.deepgram && <optgroup label="Deepgram">
+                            {ttsVoices.deepgram?.map((v) => <option key={`dg-${v}`} value={v}>{v.replace("aura-2-", "").replace("-en", "")}</option>)}
+                          </optgroup>}
+                          {ttsAvailable.openai && <optgroup label="OpenAI">
+                            {ttsVoices.openai?.map((v) => <option key={`oai-${v}`} value={v}>{v}</option>)}
+                          </optgroup>}
+                        </>
+                      )}
+                    </select>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <hr className="border-zinc-200 dark:border-zinc-800" />
+
+            {/* Speech-to-Text */}
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3">Speech-to-Text</h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
+                Click the mic icon to dictate messages by voice.
+              </p>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+                  Provider
+                </label>
+                <select
+                  value={sttProvider}
+                  onChange={(e) => setSttProvider(e.target.value)}
+                  className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100"
+                >
+                  <option value="whisper">Local Whisper (free, private, requires whisper-server)</option>
+                  <option value="deepgram" disabled={!ttsAvailable.deepgram}>Deepgram Nova-3 ($0.0043/min){!ttsAvailable.deepgram ? " -- add API key above" : ""}</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                onClick={saveVoiceSettings}
+                className="px-4 py-2 text-sm font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
+              >
+                Save
+              </button>
+              {ttsSaved && (
+                <span className="text-sm text-green-600 dark:text-green-400">Saved!</span>
+              )}
+            </div>
+
+            <p className="text-xs text-zinc-500 dark:text-zinc-500 leading-relaxed">
+              xAI Grok is the cheapest TTS at $4.20/1M chars. Deepgram gives $200 free credits for STT. The browser/Whisper options are completely free and private. Cloud providers receive your text/audio for processing.
             </p>
           </div>
         </section>
@@ -760,12 +973,13 @@ export default function SettingsPage() {
                       onClick={() => {
                         fetch("/api/update")
                           .then((r) => r.json())
-                          .then((data: { currentVersion?: string; latestVersion?: string; updateAvailable?: boolean }) => {
+                          .then((data: { currentVersion?: string; latestVersion?: string; updateAvailable?: boolean; changelog?: { version: string; date: string; notes: string }[] }) => {
                             if (data.currentVersion) {
                               setUpdateInfo({
                                 currentVersion: data.currentVersion,
                                 latestVersion: data.latestVersion || data.currentVersion,
                                 updateAvailable: !!data.updateAvailable,
+                                changelog: data.changelog || [],
                               });
                             }
                           });
@@ -785,6 +999,32 @@ export default function SettingsPage() {
                     {updateResult}
                   </div>
                 )}
+                {/* Changelog — what you get if you upgrade */}
+                {updateInfo.changelog.length > 0 && (
+                  <div className="mt-4">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-2">
+                      What&apos;s new since v{updateInfo.currentVersion}
+                    </div>
+                    <div className="space-y-3 max-h-64 overflow-y-auto">
+                      {updateInfo.changelog.map((release) => (
+                        <div key={release.version} className="border-l-2 border-emerald-400 dark:border-emerald-600 pl-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">v{release.version}</span>
+                            {release.date && (
+                              <span className="text-xs text-zinc-400">{release.date}</span>
+                            )}
+                          </div>
+                          {release.notes && (
+                            <div className="text-xs text-zinc-600 dark:text-zinc-400 mt-1 whitespace-pre-wrap leading-relaxed">
+                              {release.notes}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <p className="text-xs text-zinc-500 dark:text-zinc-500 mt-3">
                   Updates pull the latest code, install dependencies, and run database migrations. Your chats, memory, brains, and API keys are never affected.
                 </p>
@@ -870,5 +1110,149 @@ function ModelsIcon() {
       <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
       <line x1="12" y1="22.08" x2="12" y2="12" />
     </svg>
+  );
+}
+
+interface UsageBreakdown {
+  provider: string;
+  service: string;
+  total_units: number;
+  unit_type: string;
+  cost_cents: number;
+}
+
+interface UsagePeriod {
+  cost_cents: number;
+  breakdown: UsageBreakdown[];
+}
+
+function formatCost(cents: number): string {
+  if (cents === 0) return "$0.00";
+  if (cents < 1) return `$${(cents / 100).toFixed(4)}`;
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
+function formatUnits(units: number, unitType: string): string {
+  if (unitType === "ms") return `${(units / 60000).toFixed(1)} min`;
+  if (unitType === "characters") return `${(units / 1000).toFixed(1)}K chars`;
+  if (unitType === "tokens_in" || unitType === "tokens_out") return `${(units / 1000).toFixed(1)}K tokens`;
+  return String(units);
+}
+
+function UsageSection() {
+  const [usage, setUsage] = useState<{ today: UsagePeriod; thisWeek: UsagePeriod; thisMonth: UsagePeriod; allTime: UsagePeriod } | null>(null);
+  const [period, setPeriod] = useState<"today" | "thisWeek" | "thisMonth" | "allTime" | "custom">("thisMonth");
+  const [customFrom, setCustomFrom] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [customData, setCustomData] = useState<UsagePeriod | null>(null);
+
+  useEffect(() => {
+    fetch("/api/usage")
+      .then((r) => r.json())
+      .then(setUsage)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (period !== "custom") return;
+    fetch(`/api/usage?from=${customFrom}&to=${customTo}`)
+      .then((r) => r.json())
+      .then(setCustomData)
+      .catch(() => {});
+  }, [period, customFrom, customTo]);
+
+  const data = period === "custom" ? customData : usage?.[period];
+
+  return (
+    <section>
+      <h2 className="flex items-center justify-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider mb-3">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 20V10" />
+          <path d="M18 20V4" />
+          <path d="M6 20v-4" />
+        </svg>
+        Usage &amp; Estimated Costs
+      </h2>
+      <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+        {!usage ? (
+          <p className="text-sm text-zinc-400">Loading...</p>
+        ) : (
+          <>
+            {/* Period tabs */}
+            <div className="flex gap-1 mb-4 bg-zinc-100 dark:bg-zinc-800 rounded-lg p-1">
+              {([["today", "Today"], ["thisWeek", "Week"], ["thisMonth", "Month"], ["allTime", "All"], ["custom", "Custom"]] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setPeriod(key)}
+                  className={`flex-1 text-xs font-medium py-1.5 rounded-md transition-colors ${
+                    period === key
+                      ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm"
+                      : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {period === "custom" && (
+              <div className="flex items-center gap-2 mb-4">
+                <input
+                  type="date"
+                  value={customFrom}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                  className="flex-1 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-1.5 text-sm text-zinc-900 dark:text-zinc-100"
+                />
+                <span className="text-zinc-400 text-sm">to</span>
+                <input
+                  type="date"
+                  value={customTo}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                  className="flex-1 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-1.5 text-sm text-zinc-900 dark:text-zinc-100"
+                />
+              </div>
+            )}
+
+            {/* Total cost */}
+            <div className="text-center mb-4">
+              <div className="text-3xl font-bold text-zinc-900 dark:text-zinc-100">
+                {formatCost(data?.cost_cents || 0)}
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">estimated spend</div>
+            </div>
+
+            {/* Breakdown */}
+            {data && data.breakdown.length > 0 ? (
+              <div className="space-y-2">
+                {data.breakdown.map((row, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm py-1.5 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-block w-2 h-2 rounded-full ${
+                        row.service === "chat" ? "bg-blue-500" : row.service === "tts" ? "bg-purple-500" : "bg-green-500"
+                      }`} />
+                      <span className="font-medium text-zinc-700 dark:text-zinc-300 capitalize">{row.provider}</span>
+                      <span className="text-zinc-400 text-xs">{row.service.toUpperCase()}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-zinc-500 text-xs mr-2">{formatUnits(row.total_units, row.unit_type)}</span>
+                      <span className="font-medium text-zinc-900 dark:text-zinc-100">{formatCost(Number(row.cost_cents))}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-400 text-center">No usage recorded yet for this period.</p>
+            )}
+
+            <p className="text-xs text-zinc-500 mt-4 leading-relaxed">
+              Costs are estimates based on published API pricing. Token counts for chat are approximated (~4 chars per token). Check your provider dashboards for exact billing.
+            </p>
+          </>
+        )}
+      </div>
+    </section>
   );
 }

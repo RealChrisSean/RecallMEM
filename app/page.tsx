@@ -74,6 +74,198 @@ export default function ChatPage() {
   }, []);
 
   const [showBrainHint, setShowBrainHint] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordingLoopRef = useRef<boolean>(false);
+  const silenceCountRef = useRef(0);
+  const [idlePrompt, setIdlePrompt] = useState(false);
+  const [idleCountdown, setIdleCountdown] = useState(30);
+  const idleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const SILENCE_CHUNKS_BEFORE_PROMPT = 20; // ~60s of silence (20 x 3s chunks)
+  const IDLE_COUNTDOWN_SECONDS = 30;
+
+  function startIdleCountdown() {
+    setIdlePrompt(true);
+    setIdleCountdown(IDLE_COUNTDOWN_SECONDS);
+    idleTimerRef.current = setInterval(() => {
+      setIdleCountdown((prev) => {
+        if (prev <= 1) {
+          // Time's up -- stop recording
+          stopRecording();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }
+
+  function dismissIdlePrompt() {
+    setIdlePrompt(false);
+    silenceCountRef.current = 0;
+    if (idleTimerRef.current) {
+      clearInterval(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+  }
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+      setIsRecording(true);
+      recordingLoopRef.current = true;
+      silenceCountRef.current = 0;
+
+      while (recordingLoopRef.current) {
+        const text = await recordChunkAndTranscribe(stream);
+        if (text && recordingLoopRef.current) {
+          setInput((prev) => (prev ? prev + " " + text : text));
+          silenceCountRef.current = 0;
+          // If idle prompt is showing and user spoke, dismiss it
+          if (idlePrompt) dismissIdlePrompt();
+        } else if (recordingLoopRef.current && !idlePrompt) {
+          silenceCountRef.current++;
+          if (silenceCountRef.current >= SILENCE_CHUNKS_BEFORE_PROMPT) {
+            startIdleCountdown();
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[voice] mic access error:", err);
+    } finally {
+      setIsRecording(false);
+      dismissIdlePrompt();
+    }
+  }
+
+  function recordChunkAndTranscribe(stream: MediaStream): Promise<string> {
+    return new Promise((resolve) => {
+      if (!recordingLoopRef.current) { resolve(""); return; }
+
+      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+      mediaRecorderRef.current = recorder;
+      const chunks: Blob[] = [];
+
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+      recorder.onstop = async () => {
+        if (!chunks.length) { resolve(""); return; }
+        const blob = new Blob(chunks, { type: "audio/webm" });
+        try {
+          const form = new FormData();
+          form.append("audio", blob, "chunk.webm");
+          const res = await fetch("/api/transcribe", { method: "POST", body: form });
+          const data = await res.json() as { text?: string };
+          const text = (data.text || "").trim();
+          if (text && !text.startsWith("[") && !text.includes("BLANK") && text.length > 1) {
+            resolve(text);
+          } else {
+            resolve("");
+          }
+        } catch {
+          resolve("");
+        }
+      };
+
+      recorder.start();
+      setTimeout(() => {
+        if (recorder.state === "recording") recorder.stop();
+      }, 3000);
+    });
+  }
+
+  function stopRecording() {
+    recordingLoopRef.current = false;
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+    if (recordingStreamRef.current) {
+      recordingStreamRef.current.getTracks().forEach((t) => t.stop());
+      recordingStreamRef.current = null;
+    }
+    mediaRecorderRef.current = null;
+    setIsRecording(false);
+    dismissIdlePrompt();
+  }
+
+  // TTS: tries OpenAI first (if API key configured), falls back to browser SpeechSynthesis.
+  const activeSpeechRef = useRef<HTMLAudioElement | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [ttsLoading, setTtsLoading] = useState(false);
+
+  function stopSpeaking() {
+    if (activeSpeechRef.current) {
+      activeSpeechRef.current.pause();
+      activeSpeechRef.current.currentTime = 0;
+      activeSpeechRef.current = null;
+    }
+    window.speechSynthesis.cancel();
+    setIsSpeaking(false);
+  }
+
+  async function speakText(text: string) {
+    // If already speaking or loading, stop instead
+    if (isSpeaking || ttsLoading) { stopSpeaking(); setTtsLoading(false); return; }
+
+    setTtsLoading(true);
+
+    const audio = new Audio();
+    activeSpeechRef.current = audio;
+    audio.onended = () => { activeSpeechRef.current = null; setIsSpeaking(false); };
+    audio.onerror = () => {
+      activeSpeechRef.current = null;
+      setTtsLoading(false);
+      setIsSpeaking(true);
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.1;
+      utterance.onend = () => setIsSpeaking(false);
+      window.speechSynthesis.speak(utterance);
+    };
+
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (res.ok && res.headers.get("Content-Type")?.includes("audio")) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        audio.src = url;
+        audio.onended = () => { URL.revokeObjectURL(url); activeSpeechRef.current = null; setIsSpeaking(false); };
+        setTtsLoading(false);
+        setIsSpeaking(true);
+        audio.play().catch(() => {
+          URL.revokeObjectURL(url);
+          activeSpeechRef.current = null;
+          setIsSpeaking(true);
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.rate = 1.1;
+          utterance.onend = () => setIsSpeaking(false);
+          window.speechSynthesis.speak(utterance);
+        });
+        return;
+      }
+    } catch { /* fall through */ }
+
+    // No cloud TTS available — use browser SpeechSynthesis
+    setTtsLoading(false);
+    setIsSpeaking(true);
+    activeSpeechRef.current = null;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1.1;
+    utterance.onend = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+  }
+
+  // Stop TTS on page unload / refresh
+  useEffect(() => {
+    const cleanup = () => stopSpeaking();
+    window.addEventListener("beforeunload", cleanup);
+    return () => { cleanup(); window.removeEventListener("beforeunload", cleanup); };
+  }, []);
 
   // Cmd+Shift+H (Mac) / Ctrl+Shift+H (Windows) toggles brain picker visibility
   useEffect(() => {
@@ -105,47 +297,56 @@ export default function ChatPage() {
     { name: "default", emoji: "🧠" },
   ]);
 
-  // Load brains from localStorage after mount to avoid hydration mismatch
+  // Load brains from the database on mount. One-time migration from localStorage.
   useEffect(() => {
-    const saved = localStorage.getItem("recallmem.brains");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Migrate old string[] format
-          if (typeof parsed[0] === "string") {
-            setBrains(parsed.map((name: string, i: number) => ({
-              name,
-              emoji: ["🧠", "💼", "🏠", "🎯", "🔬", "📚", "💡", "🎨", "🚀", "🌍"][i] || "⭐",
-            })));
-          } else {
-            setBrains(parsed);
-          }
+    fetch("/api/brains")
+      .then((r) => r.json())
+      .then(async (d: { brains: { name: string; emoji: string }[] }) => {
+        const dbBrains = d.brains || [];
+
+        // One-time migration: if brains exist in localStorage but not in DB, push them
+        const lsBrains = localStorage.getItem("recallmem.brains");
+        if (lsBrains && dbBrains.length === 0) {
+          try {
+            const parsed = JSON.parse(lsBrains) as { name: string; emoji: string }[] | string[];
+            const toMigrate = (Array.isArray(parsed) ? parsed : []).filter(
+              (b) => (typeof b === "string" ? b : b.name) !== "default"
+            );
+            for (const b of toMigrate) {
+              const name = typeof b === "string" ? b : b.name;
+              const emoji = typeof b === "string" ? "⭐" : b.emoji;
+              await fetch("/api/brains", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name, emoji }),
+              });
+              dbBrains.push({ name, emoji });
+            }
+            // Clear localStorage after migration
+            localStorage.removeItem("recallmem.brains");
+          } catch { /* ignore */ }
         }
-      } catch { /* ignore */ }
-    }
+
+        const all = [{ name: "default", emoji: "🧠" }, ...dbBrains.filter((b) => b.name !== "default")];
+        setBrains(all);
+      })
+      .catch(() => {});
+
     const savedBrain = localStorage.getItem("recallmem.activeBrain");
     if (savedBrain) setActiveBrain(savedBrain);
   }, []);
 
-  // Set the brain cookie + persist to localStorage whenever activeBrain changes
+  // Set the brain cookie whenever activeBrain changes
   useEffect(() => {
     document.cookie = `recallmem-brain=${activeBrain};path=/;max-age=31536000`;
     localStorage.setItem("recallmem.activeBrain", activeBrain);
     refreshChatList();
   }, [activeBrain]);
 
-  // Persist brains list to localStorage
-  useEffect(() => {
-    localStorage.setItem("recallmem.brains", JSON.stringify(brains));
-  }, [brains]);
-
   function addBrain(name: string) {
     const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").trim();
     if (!slug || brains.some((b) => b.name === slug)) return;
 
-    // Pick an emoji based on the brain name. Keywords map to relevant
-    // emojis. Falls back to a pool of unused emojis so they never repeat.
     const KEYWORD_EMOJIS: Record<string, string> = {
       work: "💼", job: "💼", career: "💼", office: "💼",
       personal: "🏠", home: "🏠", family: "🏠", life: "🏠",
@@ -172,19 +373,17 @@ export default function ChatPage() {
 
     const usedEmojis = new Set(brains.map((b) => b.emoji));
     let emoji = "";
-
-    // Try keyword match first
     for (const [keyword, e] of Object.entries(KEYWORD_EMOJIS)) {
-      if (slug.includes(keyword) && !usedEmojis.has(e)) {
-        emoji = e;
-        break;
-      }
+      if (slug.includes(keyword) && !usedEmojis.has(e)) { emoji = e; break; }
     }
+    if (!emoji) emoji = FALLBACK_EMOJIS.find((e) => !usedEmojis.has(e)) || "🧠";
 
-    // Fall back to first unused emoji from the pool
-    if (!emoji) {
-      emoji = FALLBACK_EMOJIS.find((e) => !usedEmojis.has(e)) || "🧠";
-    }
+    // Save to database
+    fetch("/api/brains", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: slug, emoji }),
+    }).catch(() => {});
 
     setBrains((prev) => [...prev, { name: slug, emoji }]);
     setActiveBrain(slug);
@@ -197,8 +396,15 @@ export default function ChatPage() {
   }
 
   function deleteBrain(slug: string) {
-    if (slug === "default") return; // can't delete default
+    if (slug === "default") return;
     if (!confirm(`Delete the "${slug}" brain? All its chats and memory will remain in the database but won't be accessible from the UI.`)) return;
+
+    fetch("/api/brains", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: slug }),
+    }).catch(() => {});
+
     setBrains((prev) => prev.filter((b) => b.name !== slug));
     if (activeBrain === slug) switchBrain("default");
   }
@@ -209,6 +415,13 @@ export default function ChatPage() {
     if (!newName || newName === slug) return;
     const newSlug = newName.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").trim();
     if (!newSlug || brains.some((b) => b.name === newSlug)) return;
+
+    fetch("/api/brains", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ oldName: slug, newName: newSlug }),
+    }).catch(() => {});
+
     setBrains((prev) =>
       prev.map((b) => (b.name === slug ? { ...b, name: newSlug } : b))
     );
@@ -958,6 +1171,7 @@ export default function ChatPage() {
       abortRef.current = null;
       setIsStreaming(false);
       refreshChatList();
+
       // Poll for the title to appear (server generates it fire-and-forget after
       // the response stream finishes). Stops as soon as the title is set or
       // after a 15-second timeout.
@@ -1166,7 +1380,7 @@ export default function ChatPage() {
               </p>
             </div>
           ) : (
-            messages.map((msg, i) => <MessageBubble key={i} message={msg} />)
+            messages.map((msg, i) => <MessageBubble key={i} message={msg} onSpeak={speakText} isSpeaking={isSpeaking} ttsLoading={ttsLoading} />)
           )}
         </div>
       </div>
@@ -1223,6 +1437,27 @@ export default function ChatPage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Idle mic prompt */}
+      {idlePrompt && (
+        <div className="flex items-center justify-center gap-3 py-3 px-4 bg-amber-50 dark:bg-amber-950/30 border-t border-amber-200 dark:border-amber-800">
+          <span className="text-sm text-amber-700 dark:text-amber-300">
+            Still listening? Stopping in <strong>{idleCountdown}s</strong>
+          </span>
+          <button
+            onClick={dismissIdlePrompt}
+            className="px-3 py-1 text-sm font-medium bg-amber-600 text-white rounded-md hover:bg-amber-700 transition-colors"
+          >
+            Yes, I&apos;m here
+          </button>
+          <button
+            onClick={stopRecording}
+            className="px-3 py-1 text-sm font-medium border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors"
+          >
+            Stop
+          </button>
         </div>
       )}
 
@@ -1310,11 +1545,29 @@ export default function ChatPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={noChatBackend ? "Set up a model first ↑" : "Ask me anything"}
+              placeholder={noChatBackend ? "Set up a model first ↑" : isRecording ? "Listening..." : "Ask me anything"}
               rows={1}
               disabled={noChatBackend}
               className="flex-1 resize-none bg-transparent py-3 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none disabled:opacity-50"
             />
+            {/* Mic button — real-time whisper-stream transcription */}
+            <button
+              type="button"
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={noChatBackend || isStreaming}
+              className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                isRecording
+                  ? "bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400 animate-pulse"
+                  : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              }`}
+              title={isRecording ? "Stop listening" : "Voice input (Whisper)"}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="22" />
+              </svg>
+            </button>
             {isStreaming ? (
               <button
                 type="button"
@@ -2133,7 +2386,7 @@ function TrashIcon() {
   );
 }
 
-const MessageBubble = memo(function MessageBubble({ message }: { message: Message }) {
+const MessageBubble = memo(function MessageBubble({ message, onSpeak, isSpeaking, ttsLoading }: { message: Message; onSpeak?: (text: string) => void; isSpeaking?: boolean; ttsLoading?: boolean }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
 
@@ -2203,9 +2456,36 @@ const MessageBubble = memo(function MessageBubble({ message }: { message: Messag
         ) : null}
         {/* Copy button — inside bubble, top-right, appears on hover */}
         {message.content && (
+          <div className={`absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity`}>
+            {/* Speaker button — cloud TTS if available, else browser SpeechSynthesis */}
+            {!isUser && onSpeak && (
+              <button
+                onClick={() => onSpeak(displayContent)}
+                className={`p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                  ttsLoading ? "text-zinc-400 animate-spin" : isSpeaking ? "text-blue-500" : "text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+                }`}
+                title={ttsLoading ? "Loading..." : isSpeaking ? "Stop speaking" : "Read aloud"}
+              >
+                {ttsLoading ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                ) : isSpeaking ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                  </svg>
+                )}
+              </button>
+            )}
           <button
             onClick={copyToClipboard}
-            className={`absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
+            className={`p-1 rounded ${
               isUser
                 ? "text-white/50 hover:text-white hover:bg-white/10"
                 : "text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
@@ -2223,6 +2503,7 @@ const MessageBubble = memo(function MessageBubble({ message }: { message: Messag
               </svg>
             )}
           </button>
+          </div>
         )}
       </div>
     </div>

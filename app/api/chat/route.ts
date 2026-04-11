@@ -6,6 +6,7 @@ import { generateTitleIfMissing, extractFactsLive } from "@/lib/post-chat";
 import { getLangfuse } from "@/lib/langfuse";
 import { searchWeb, formatWebOutcome } from "@/lib/web-search";
 import { getProvider } from "@/lib/providers";
+import { logUsage } from "@/lib/usage";
 import type { Message } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -225,6 +226,19 @@ export async function POST(req: NextRequest) {
                 output: assistantContent,
               });
               trace?.update({ output: assistantContent });
+
+              // Log usage estimate (~4 chars per token)
+              const inputChars = llmMessages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
+              const outputChars = assistantContent.length;
+              let usageProvider = "ollama";
+              if (body.providerId) {
+                const prov = await getProvider(body.providerId);
+                if (prov) usageProvider = prov.type === "openai-compatible" && prov.base_url?.includes("x.ai") ? "xai" : prov.type;
+              }
+              const tokensIn = Math.round(inputChars / 4);
+              const tokensOut = Math.round(outputChars / 4);
+              logUsage({ provider: usageProvider, service: "chat", model: body.model || undefined, units: tokensIn, unitType: "tokens_in" });
+              logUsage({ provider: usageProvider, service: "chat", model: body.model || undefined, units: tokensOut, unitType: "tokens_out" });
 
               // Save updated chat with the new assistant message
               const fullMessages: Message[] = [
