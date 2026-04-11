@@ -46,6 +46,7 @@ The features that I want next but didn't make v0.1.
 ## v0.3 (later)
 
 ### Export / backup / migration
+- [ ] **Export/Import via Settings UI.** One-click export button that dumps all data (chats, facts, profile, brains, providers, settings, embeddings) as a single file. Import button that restores from that file on another machine. Transfer your entire RecallMEM from one computer to another without touching the terminal. Currently possible via `pg_dump`/`pg_restore` but normal users shouldn't need to know that.
 - [ ] Export everything as JSON for backups (`npx recallmem export > backup.json`)
 - [ ] Import from JSON (`npx recallmem import backup.json`)
 - [ ] Settings page with retention policies (auto-delete chats older than X days)
