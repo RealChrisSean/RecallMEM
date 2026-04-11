@@ -1,7 +1,7 @@
 // System prompt builder for memory-aware chat
 
-const MAX_PROFILE_CHARS = 6000;
-const MAX_RECALL_CHARS = 1500;
+const MAX_PROFILE_CHARS = 30000;
+const MAX_RECALL_CHARS = 5000;
 const MAX_RULES_CHARS = 4000;
 
 interface PromptContext {

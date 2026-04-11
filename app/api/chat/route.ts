@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
       providerId?: string;
       webSearch?: boolean;
       thinking?: boolean;
+      privateMode?: boolean;
     };
 
     if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
@@ -64,19 +65,32 @@ export async function POST(req: NextRequest) {
       chatId = await createChat(mode);
     }
 
-    // Build memory-aware system prompt using the latest user message for vector search
+    // Build system prompt. In private mode, skip all memory context
+    // (profile, facts, vector search) and only include custom rules.
+    // The user's personal data never reaches the cloud LLM.
     const latestUserMessage = body.messages[body.messages.length - 1];
-    const memorySpan = trace?.span({
-      name: "build-memory-prompt",
-      input: { query: latestUserMessage.content, chatId },
-    });
-    let systemPromptText = await buildMemoryAwareSystemPrompt(
-      latestUserMessage.content,
-      chatId
-    );
-    memorySpan?.end({
-      output: { promptLength: systemPromptText.length },
-    });
+    let systemPromptText: string;
+
+    if (body.privateMode) {
+      // Private mode: rules only, no memory
+      const { getRules } = await import("@/lib/rules");
+      const rules = await getRules();
+      systemPromptText = rules
+        ? `You are a helpful assistant.\n\n<custom_rules>\n${rules}\n</custom_rules>`
+        : "You are a helpful assistant.";
+    } else {
+      const memorySpan = trace?.span({
+        name: "build-memory-prompt",
+        input: { query: latestUserMessage.content, chatId },
+      });
+      systemPromptText = await buildMemoryAwareSystemPrompt(
+        latestUserMessage.content,
+        chatId
+      );
+      memorySpan?.end({
+        output: { promptLength: systemPromptText.length },
+      });
+    }
 
     // Web search for local providers (Ollama). Anthropic gets web search via
     // its own native tool downstream; OpenAI is not wired yet. For Ollama
@@ -233,12 +247,16 @@ export async function POST(req: NextRequest) {
               // appear in the next message without waiting for chat
               // finalization. Always uses local FAST_MODEL so cloud users
               // don't pay extra per turn.
-              extractFactsLive(finalChatId, {
-                model: body.model,
-                providerId: body.providerId,
-              }).catch((err) =>
-                console.error("[chat] live fact extraction error:", err)
-              );
+              // Skip fact extraction in private mode — private conversations
+              // should not be saved to memory.
+              if (!body.privateMode) {
+                extractFactsLive(finalChatId, {
+                  model: body.model,
+                  providerId: body.providerId,
+                }).catch((err) =>
+                  console.error("[chat] live fact extraction error:", err)
+                );
+              }
 
               // Full memory persistence (facts + profile + embeddings) still
               // happens via /api/chat/finalize when the user ends the

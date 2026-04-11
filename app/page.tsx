@@ -60,6 +60,7 @@ export default function ChatPage() {
   const [showWebSearchWarning, setShowWebSearchWarning] = useState(false);
   const [dontShowWebSearchWarning, setDontShowWebSearchWarning] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  const [privateMode, setPrivateMode] = useState(false);
   // Installed Ollama models. Used to detect when the user picks one from
   // the dropdown that hasn't been pulled yet, so we can offer to download.
   const [installedOllamaModels, setInstalledOllamaModels] = useState<Set<string>>(
@@ -262,6 +263,22 @@ export default function ChatPage() {
       localStorage.setItem(MODEL_STORAGE_KEY, `ollama:${selectedModel}`);
     }
   }, [selectedModel, selectedProviderId]);
+
+  // Close modals on Escape key
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setPendingDownloadModel(null);
+        setDownloadProgress(null);
+        setDownloadError(null);
+        setShowWebSearchWarning(false);
+        setDontShowWebSearchWarning(false);
+        setIsDragging(false);
+      }
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, []);
 
   // Load + persist web search toggle
   useEffect(() => {
@@ -654,6 +671,7 @@ export default function ChatPage() {
             : { model: selectedModel }),
           webSearch,
           thinking: thinkingEnabled,
+          privateMode,
         }),
         signal: abort.signal,
       });
@@ -851,7 +869,7 @@ export default function ChatPage() {
       />
 
       {/* Main column */}
-      <div className="flex flex-col flex-1 min-w-0">
+      <div className="flex flex-col flex-1 min-w-0 h-screen">
       {/* Header */}
       <header className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -893,6 +911,27 @@ export default function ChatPage() {
             customProviders={customProviders}
             disabled={isStreaming || isFinalizing}
           />
+          <div className="group relative">
+            <button
+              onClick={() => setPrivateMode((v) => !v)}
+              className={`w-9 h-9 flex items-center justify-center rounded-md border transition-colors ${
+                privateMode
+                  ? "border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400"
+                  : "border-zinc-200 dark:border-zinc-800 text-zinc-400 dark:text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              }`}
+              title={privateMode ? "Private mode on" : "Private mode off"}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </button>
+            <span className="pointer-events-none absolute top-full right-0 mt-1.5 px-2.5 py-1.5 text-[10px] font-medium leading-snug rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 opacity-0 group-hover:opacity-100 transition-opacity shadow-md z-50 w-52">
+              {privateMode
+                ? "Private mode ON. Your memory, profile, and facts are NOT sent to the cloud LLM. Only your rules and the current message."
+                : "Private mode OFF. Your memory context is included for better responses."}
+            </span>
+          </div>
           <Link
             href="/settings"
             className="px-3 py-1.5 text-sm font-medium rounded-md border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-700 dark:text-zinc-300"
@@ -945,7 +984,11 @@ export default function ChatPage() {
           {messages.length === 0 ? (
             <div className="text-center py-20">
               <p className="text-zinc-500 dark:text-zinc-400 text-sm">
-                Start a conversation. Nothing leaves your machine.
+                Start a conversation. Everything stays on your machine.
+                <br />
+                <span className="text-zinc-400 dark:text-zinc-600 text-xs">
+                  Cloud LLMs (Anthropic, OpenAI, etc.) only see what you send them.
+                </span>
               </p>
             </div>
           ) : (
@@ -1153,8 +1196,11 @@ export default function ChatPage() {
 
       {/* Drag overlay */}
       {isDragging && (
-        <div className="absolute inset-0 z-50 bg-zinc-900/40 dark:bg-zinc-950/60 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-          <div className="bg-white dark:bg-zinc-900 border-2 border-dashed border-zinc-400 dark:border-zinc-600 rounded-2xl px-12 py-8 text-center">
+        <div
+          className="absolute inset-0 z-50 bg-zinc-900/40 dark:bg-zinc-950/60 backdrop-blur-sm flex items-center justify-center cursor-pointer"
+          onClick={() => setIsDragging(false)}
+        >
+          <div className="bg-white dark:bg-zinc-900 border-2 border-dashed border-zinc-400 dark:border-zinc-600 rounded-2xl px-12 py-8 text-center pointer-events-none">
             <div className="text-zinc-700 dark:text-zinc-200 font-medium">Drop files to attach</div>
             <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
               Images, PDFs, text, code
@@ -1165,8 +1211,8 @@ export default function ChatPage() {
 
       {/* Model download modal - shown when user picks an unavailable Ollama model */}
       {pendingDownloadModel && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full shadow-xl">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { setPendingDownloadModel(null); setDownloadProgress(null); setDownloadError(null); }}>
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
               Download {MODEL_OPTIONS.find((m) => m.id === pendingDownloadModel)?.label || pendingDownloadModel}?
             </h2>
@@ -1246,8 +1292,8 @@ export default function ChatPage() {
 
       {/* First-time web search privacy warning (local providers only) */}
       {showWebSearchWarning && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-lg shadow-xl">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { setShowWebSearchWarning(false); setDontShowWebSearchWarning(false); }}>
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-lg shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
               Web search needs a free Brave Search API key
             </h2>

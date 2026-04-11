@@ -5,7 +5,7 @@ import { getLastChatTime } from "@/lib/chats";
 import { getRules } from "@/lib/rules";
 import { buildSystemPrompt } from "@/lib/prompts";
 
-const MAX_QUICK_FACTS = 50;
+const MAX_QUICK_FACTS = 200;
 
 // Load the full memory context for a chat and build the system prompt.
 // This is what gets injected as the system message in every LLM call.
