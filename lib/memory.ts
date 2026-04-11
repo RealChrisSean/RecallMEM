@@ -1,11 +1,9 @@
 import { getProfile } from "@/lib/profile";
-import { getActiveFacts } from "@/lib/facts";
+import { getSmartFacts } from "@/lib/facts";
 import { searchChunks } from "@/lib/chunks";
 import { getLastChatTime } from "@/lib/chats";
 import { getRules } from "@/lib/rules";
 import { buildSystemPrompt } from "@/lib/prompts";
-
-const MAX_QUICK_FACTS = 200;
 
 // Load the full memory context for a chat and build the system prompt.
 // This is what gets injected as the system message in every LLM call.
@@ -15,7 +13,7 @@ export async function buildMemoryAwareSystemPrompt(
 ): Promise<string> {
   const [profileRow, facts, lastChatTime, customRules] = await Promise.all([
     getProfile(),
-    getActiveFacts(MAX_QUICK_FACTS),
+    getSmartFacts(latestUserMessage, 150),
     getLastChatTime(),
     getRules(),
   ]);
@@ -26,7 +24,7 @@ export async function buildMemoryAwareSystemPrompt(
   let recallChunks: { text: string; date: Date }[] = [];
   if (latestUserMessage && latestUserMessage.length > 5) {
     try {
-      const results = await searchChunks(latestUserMessage, excludeChatId, 5);
+      const results = await searchChunks(latestUserMessage, excludeChatId, 8);
       recallChunks = results
         .filter((r) => r.distance < 0.6)
         .map((r) => ({ text: r.chunk_text, date: r.chat_created_at }));

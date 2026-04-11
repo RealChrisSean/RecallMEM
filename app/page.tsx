@@ -211,19 +211,8 @@ export default function ChatPage() {
 
     setTtsLoading(true);
 
-    const audio = new Audio();
-    activeSpeechRef.current = audio;
-    audio.onended = () => { activeSpeechRef.current = null; setIsSpeaking(false); };
-    audio.onerror = () => {
-      activeSpeechRef.current = null;
-      setTtsLoading(false);
-      setIsSpeaking(true);
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.1;
-      utterance.onend = () => setIsSpeaking(false);
-      window.speechSynthesis.speak(utterance);
-    };
-
+    // Fetch TTS audio from API
+    let audioBlob: Blob | null = null;
     try {
       const res = await fetch("/api/tts", {
         method: "POST",
@@ -231,26 +220,43 @@ export default function ChatPage() {
         body: JSON.stringify({ text }),
       });
       if (res.ok && res.headers.get("Content-Type")?.includes("audio")) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        audio.src = url;
-        audio.onended = () => { URL.revokeObjectURL(url); activeSpeechRef.current = null; setIsSpeaking(false); };
-        setTtsLoading(false);
-        setIsSpeaking(true);
-        audio.play().catch(() => {
-          URL.revokeObjectURL(url);
-          activeSpeechRef.current = null;
-          setIsSpeaking(true);
-          const utterance = new SpeechSynthesisUtterance(text);
-          utterance.rate = 1.1;
-          utterance.onend = () => setIsSpeaking(false);
-          window.speechSynthesis.speak(utterance);
-        });
-        return;
+        audioBlob = await res.blob();
       }
-    } catch { /* fall through */ }
+    } catch { /* fall through to browser TTS */ }
 
-    // No cloud TTS available — use browser SpeechSynthesis
+    if (audioBlob && audioBlob.size > 0) {
+      const url = URL.createObjectURL(audioBlob);
+
+      // Get or create persistent audio element to avoid autoplay issues
+      let audioEl = document.getElementById("recallmem-tts-audio") as HTMLAudioElement | null;
+      if (!audioEl) {
+        audioEl = document.createElement("audio");
+        audioEl.id = "recallmem-tts-audio";
+        document.body.appendChild(audioEl);
+      }
+
+      audioEl.src = url;
+      audioEl.onended = () => {
+        URL.revokeObjectURL(url);
+        activeSpeechRef.current = null;
+        setIsSpeaking(false);
+      };
+      activeSpeechRef.current = audioEl;
+
+      setTtsLoading(false);
+      setIsSpeaking(true);
+
+      try {
+        await audioEl.play();
+        return;
+      } catch (e) {
+        console.warn("[tts] play failed:", e);
+        URL.revokeObjectURL(url);
+        activeSpeechRef.current = null;
+      }
+    }
+
+    // Fallback: browser SpeechSynthesis
     setTtsLoading(false);
     setIsSpeaking(true);
     activeSpeechRef.current = null;

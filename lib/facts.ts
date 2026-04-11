@@ -1,4 +1,5 @@
-import { query, queryOne, getUserId } from "@/lib/db";
+import { query, queryOne, getUserId, toVectorString } from "@/lib/db";
+import { embed } from "@/lib/embeddings";
 import { chat as llmChat, FAST_MODEL } from "@/lib/llm";
 import type { UserFactRow } from "@/lib/types";
 
@@ -340,10 +341,17 @@ export async function storeFacts(
     const normalized = fact.toLowerCase().trim();
     if (existingSet.has(normalized)) continue;
     const category = categorize(fact);
+    // Generate embedding for vector search (fire-and-forget if it fails)
+    let embeddingStr: string | null = null;
+    try {
+      const vec = await embed(fact);
+      embeddingStr = toVectorString(vec);
+    } catch { /* non-critical */ }
+
     await query(
-      `INSERT INTO s2m_user_facts (user_id, fact_text, category, source_chat_id, is_active)
-       VALUES ($1, $2, $3, $4, TRUE)`,
-      [userId, fact, category, sourceChatId]
+      `INSERT INTO s2m_user_facts (user_id, fact_text, category, source_chat_id, is_active, embedding)
+       VALUES ($1, $2, $3, $4, TRUE, $5::vector)`,
+      [userId, fact, category, sourceChatId, embeddingStr]
     );
     existingSet.add(normalized);
     inserted++;
@@ -361,6 +369,78 @@ export async function getActiveFacts(limit = 200): Promise<UserFactRow[]> {
      LIMIT $2`,
     [userId, limit]
   );
+}
+
+// Vector search over facts — finds facts semantically relevant to the query
+export async function searchFacts(
+  queryText: string,
+  limit = 30
+): Promise<(UserFactRow & { distance: number })[]> {
+  const userId = await getUserId();
+  const queryEmbedding = await embed(queryText);
+  const vector = toVectorString(queryEmbedding);
+
+  return query<UserFactRow & { distance: number }>(
+    `SELECT *, embedding <=> $1::vector AS distance
+     FROM s2m_user_facts
+     WHERE user_id = $2 AND is_active = TRUE AND embedding IS NOT NULL
+     ORDER BY distance ASC
+     LIMIT $3`,
+    [vector, userId, limit]
+  );
+}
+
+// Get identity/relationship facts that should always be included
+const PINNED_CATEGORIES = ["identity", "family"];
+export async function getPinnedFacts(limit = 30): Promise<UserFactRow[]> {
+  const userId = await getUserId();
+  return query<UserFactRow>(
+    `SELECT * FROM s2m_user_facts
+     WHERE user_id = $1 AND is_active = TRUE AND category = ANY($2)
+     ORDER BY created_at DESC
+     LIMIT $3`,
+    [userId, PINNED_CATEGORIES, limit]
+  );
+}
+
+// Smart fact selection: pinned identity facts + vector-matched + recent
+// Deduplicates by fact ID so nothing appears twice
+export async function getSmartFacts(
+  queryText: string,
+  totalLimit = 150
+): Promise<UserFactRow[]> {
+  const seen = new Set<string>();
+  const result: UserFactRow[] = [];
+
+  const add = (facts: UserFactRow[]) => {
+    for (const f of facts) {
+      if (!seen.has(f.id) && result.length < totalLimit) {
+        seen.add(f.id);
+        result.push(f);
+      }
+    }
+  };
+
+  // 1. Always include identity/family facts (who the user IS)
+  const pinned = await getPinnedFacts(30);
+  add(pinned);
+
+  // 2. Vector-search for facts relevant to what the user is asking
+  if (queryText && queryText.length > 5) {
+    try {
+      const relevant = await searchFacts(queryText, 50);
+      // Only include facts with reasonable similarity
+      add(relevant.filter((f) => f.distance < 0.65));
+    } catch (err) {
+      console.error("[facts] vector search failed:", err);
+    }
+  }
+
+  // 3. Fill remaining slots with most recent facts
+  const recent = await getActiveFacts(totalLimit);
+  add(recent);
+
+  return result;
 }
 
 // Delete a single fact (mark inactive)
