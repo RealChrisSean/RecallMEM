@@ -106,7 +106,7 @@ Then set these in `.env.local`:
 ```
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_BASEURL=http://localhost:3000  # optional, defaults to cloud.langfuse.com
+LANGFUSE_BASEURL=http://localhost:3001  # optional, defaults to cloud.langfuse.com
 ```
 
 Self-host Langfuse via Docker so traces stay on your machine. This is a developer-only debugging tool. Trace payloads include the actual user message content, so don't enable it on machines where conversation contents shouldn't leave the local environment.

@@ -33,15 +33,15 @@ async function startCommand(opts = {}) {
   const command = hasBuild ? "start" : "dev";
 
   info(hasBuild ? "Production build detected, running next start" : "No build found, running next dev");
-  info("Opening http://localhost:3000 in your browser...");
+  info("Opening http://localhost:1337 in your browser...");
   console.log("");
   console.log(color.dim("  (Press Ctrl+C to stop)"));
   console.log("");
 
   // Open the browser shortly after starting (give Next a moment to be ready)
-  setTimeout(() => openBrowser("http://localhost:3000"), 2000);
+  setTimeout(() => openBrowser("http://localhost:1337"), 2000);
 
-  const child = spawn("npx", ["next", command], {
+  const child = spawn("npx", ["next", command, "-p", "1337"], {
     cwd: installPath,
     stdio: "inherit",
     env: process.env,

@@ -12,7 +12,7 @@ RecallMEM does it backwards. **The LLM proposes, TypeScript decides.** On reads,
 
 ```mermaid
 flowchart TB
-    Browser["Browser<br/>Chat UI<br/>localhost:3000"]
+    Browser["Browser<br/>Chat UI<br/>localhost:1337"]
     NextJS["Next.js App<br/>API routes + SSR"]
     Postgres[("Postgres + pgvector<br/>localhost:5432<br/>Chats, facts, profile, embeddings")]
     Ollama["Ollama<br/>localhost:11434<br/>Gemma 4 + EmbeddingGemma"]

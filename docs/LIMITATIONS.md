@@ -6,7 +6,7 @@ This is v0.1. It works, used daily, but it's not "production ready" in the corpo
 
 **No voice yet.** It's text only. Whisper for speech-to-text and Piper for text-to-speech (both local) are on the roadmap.
 
-**No mobile app.** It's a web app you run locally. You access it from your browser at `localhost:3000`. A native iOS/Android app is theoretically possible but it's a separate project.
+**No mobile app.** It's a web app you run locally. You access it from your browser at `localhost:1337`. A native iOS/Android app is theoretically possible but it's a separate project.
 
 **No multi-user.** This is a personal app for one person on one machine. If you want a multi-user version, that's a separate fork.
 

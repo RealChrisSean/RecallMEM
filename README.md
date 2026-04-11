@@ -10,6 +10,10 @@
 </p>
 
 <p align="center">
+  <code>npx recallmem</code>
+</p>
+
+<p align="center">
   Chatbots like ChatGPT, Claude, and Gemini tend to forget you the moment you end your session. RecallMEM doesn't. It builds a profile of who you are, extracts facts after every conversation, and runs vector search across your entire history to find relevant context. By the time you've used it for a week, it knows you better than any AI ever will.
 </p>
 
@@ -64,7 +68,7 @@ You need Node.js 20+ and [Homebrew](https://brew.sh). The installer uses Homebre
 npx recallmem
 ```
 
-The installer sets up Postgres, pgvector, and Ollama (for the embedding model that powers memory). When the browser opens to `localhost:3000`:
+The installer sets up Postgres, pgvector, and Ollama (for the embedding model that powers memory). When the browser opens to `localhost:1337`:
 
 1. Click **Settings** in the top right
 2. Click **Providers**

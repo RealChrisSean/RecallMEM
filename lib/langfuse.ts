@@ -12,7 +12,7 @@ import "server-only";
  * **Self-hosted by default.** The point of pairing this with RecallMEM is
  * that traces don't have to leave your machine. Run Langfuse locally via
  * Docker (https://langfuse.com/docs/deployment/self-host) and point
- * `LANGFUSE_BASEURL` at `http://localhost:3000`.
+ * `LANGFUSE_BASEURL` at your Langfuse instance URL.
  *
  * Required env vars to enable:
  *   LANGFUSE_PUBLIC_KEY  - public key from your Langfuse project
