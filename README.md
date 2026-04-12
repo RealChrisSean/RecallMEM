@@ -45,7 +45,7 @@ You can run it three ways:
 
 ## How it compares
 
-|  | **RecallMEM** | **ChatGPT / Claude.ai** | **Mem0** |
+| Feature | **RecallMEM** | **ChatGPT / Claude.ai** | **Mem0** |
 |---|---|---|---|
 | **Deterministic memory** (no LLM on read, TS-gated writes, auto-retires stale facts) | ✅ Full | ❌ | ⚠️ Partial |
 | **Multiple brains** (isolated memory namespaces per agent/project/user) | ✅ | ❌ | ❌ |
