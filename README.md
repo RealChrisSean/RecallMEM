@@ -22,7 +22,7 @@
 </p>
 
 <p align="center">
-  <img src="./public/screenshots/demo.png" alt="RecallMEM chat UI showing the AI remembering the user's name across conversations" width="900">
+  <img src="./public/screenshots/demo.png?v=2" alt="RecallMEM showing multiple brains, model picker, and chat UI" width="900">
 </p>
 
 <p align="center">
