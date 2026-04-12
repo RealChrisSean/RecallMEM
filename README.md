@@ -43,18 +43,46 @@ You can run it three ways:
 - **Local LLMs (recommended for privacy).** Run Gemma 4 via Ollama. Nothing leaves your machine, ever. Slower setup (~7-20 GB model download) and slower responses, but truly air-gappable.
 - **Both.** Use cloud for daily chat, switch to local for the sensitive stuff. The model dropdown lets you pick per-conversation.
 
+## How it compares
+
+| | RecallMEM | ChatGPT / Claude.ai | Mem0 |
+|---|---|---|---|
+| **Runs locally** | Yes | No | No |
+| **Memory retrieval is deterministic (no LLM tool calls on read)** | Yes | No | No |
+| **Memory writes are TypeScript-gated (LLM proposes only)** | Yes | No | Partial |
+| **Persistent memory across chats** | Yes | Partial | Yes |
+| **Temporal awareness (memories know when they were true)** | Yes | No | No |
+| **Auto-retires stale facts when truth changes** | Yes | No | No |
+| **You can edit / delete memories** | Yes | Partial | Yes |
+| **Vector search over past chats + facts** | Yes | No | Yes |
+| **Multiple brains (isolated memory namespaces)** | Yes | No | No |
+| **Voice input (STT) + text-to-speech (TTS)** | Yes | Partial | No |
+| **Custom rules / behavior** | Yes | Yes | No |
+| **Bring your own LLM (any provider)** | Yes | No | No |
+| **Use local models (Gemma 4, Llama, etc)** | Yes | No | No |
+| **PDF vision (sees images in PDFs, not just text)** | Yes | Yes | No |
+| **Usage tracking with cost estimates** | Yes | No | No |
+| **No account / no signup** | Yes | No | No |
+| **Free** | Yes | Partial | Partial |
+| **Source available** | Yes (Apache 2.0) | No | Partial |
+
 ## Features
 
 - **Three-layer memory** across every chat: synthesized profile, extracted facts table, and vector search over all past conversations
+- **Smart fact selection** using vector search on facts themselves, not just recent ones. Pinned identity facts + semantically relevant facts + recent facts.
 - **Temporal awareness** so the model knows what's current vs. historical. Auto-retires stale facts when the truth changes.
 - **Live fact extraction** after every assistant reply, not just when the chat ends
+- **Multiple brains** for isolated memory namespaces (work, personal, demo, etc). Each brain has its own chats, facts, and profile. Stored in Postgres, not localStorage.
 - **Memory inspector** where you can view, edit, or delete every fact
-- **Vector search** across past conversations with dated recall
+- **Vector search** across past conversations and facts with dated recall
+- **Voice input (STT)** via Deepgram Nova-3 or local Whisper. Idle mic timeout after 60s of silence.
+- **Text-to-speech (TTS)** via xAI Grok, OpenAI HD, Deepgram Aura-2, or free browser voice. Chunked playback for instant start on long responses.
 - **Custom rules** for how you want the AI to talk to you
-- **File uploads** (images, PDFs, code). Gemma 4 handles vision natively.
+- **File uploads** (images, PDFs, code). PDFs are rendered page-by-page as images so the LLM sees charts and diagrams, not just extracted text.
 - **Web search** when using Anthropic or Ollama (via Brave Search)
+- **Usage tracking** with estimated costs for chat, TTS, and STT across all providers
 - **Wipe memory unrecoverably** with `DELETE` + `VACUUM FULL` + `CHECKPOINT`
-- **Bring any LLM.** Ollama, Anthropic, OpenAI, or any OpenAI-compatible API.
+- **Bring any LLM.** Ollama, Anthropic, OpenAI, xAI (Grok), or any OpenAI-compatible API.
 
 ## Quick start (Mac)
 
@@ -164,9 +192,9 @@ Wire in your own auth with two calls at startup and every lib function respects 
 | [Troubleshooting](./docs/TROUBLESHOOTING.md) | Every gotcha I've hit and how to fix it |
 | [Manual install](./docs/MANUAL_INSTALL.md) | Step-by-step if you don't want to use the CLI |
 
-## Limitations (v0.1)
+## Limitations (v0.2)
 
-Text only (no voice yet). No multi-user. No mobile app. OpenAI vision not fully wired. Reasoning models (o1/o3, extended thinking) may have edge cases. Fact supersession is LLM-judged and intentionally conservative. See the [full limitations list](./docs/LIMITATIONS.md).
+No multi-user. No mobile app. Reasoning models (o1/o3, extended thinking) may have edge cases. Fact supersession is LLM-judged and intentionally conservative. See the [full limitations list](./docs/LIMITATIONS.md).
 
 ## Contributing
 
@@ -178,7 +206,7 @@ Apache 2.0. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE). Use it, modify it, 
 
 ## Status
 
-v0.1.2. It works. I use it every day.
+v0.2.0. It works. I use it every day.
 
 I built RecallMEM because I wanted an AI that actually knows me. Not because I'm paranoid about privacy (though that's a nice bonus). The chat models you use today forget you the second you close the tab and that drives me crazy. So I fixed it.
 
