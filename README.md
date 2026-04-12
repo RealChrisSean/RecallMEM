@@ -45,26 +45,14 @@ You can run it three ways:
 
 ## How it compares
 
-| | RecallMEM | ChatGPT / Claude.ai | Mem0 |
+|  | **RecallMEM** | **ChatGPT / Claude.ai** | **Mem0** |
 |---|---|---|---|
-| **Runs locally** | Yes | No | No |
-| **Memory retrieval is deterministic (no LLM tool calls on read)** | Yes | No | No |
-| **Memory writes are TypeScript-gated (LLM proposes only)** | Yes | No | Partial |
-| **Persistent memory across chats** | Yes | Partial | Yes |
-| **Temporal awareness (memories know when they were true)** | Yes | No | No |
-| **Auto-retires stale facts when truth changes** | Yes | No | No |
-| **You can edit / delete memories** | Yes | Partial | Yes |
-| **Vector search over past chats + facts** | Yes | No | Yes |
-| **Multiple brains (isolated memory namespaces)** | Yes | No | No |
-| **Voice input (STT) + text-to-speech (TTS)** | Yes | Partial | No |
-| **Custom rules / behavior** | Yes | Yes | No |
-| **Bring your own LLM (any provider)** | Yes | No | No |
-| **Use local models (Gemma 4, Llama, etc)** | Yes | No | No |
-| **PDF vision (sees images in PDFs, not just text)** | Yes | Yes | No |
-| **Usage tracking with cost estimates** | Yes | No | No |
-| **No account / no signup** | Yes | No | No |
-| **Free** | Yes | Partial | Partial |
-| **Source available** | Yes (Apache 2.0) | No | Partial |
+| **Deterministic memory** (no LLM on read, TS-gated writes, auto-retires stale facts) | ✅ Full | ❌ | ⚠️ Partial |
+| **Multiple brains** (isolated memory namespaces per agent/project/user) | ✅ | ❌ | ❌ |
+| **Runs locally** (own LLM, local models, no signup) | ✅ | ❌ | ❌ |
+| **Temporal + editable** (knows when facts were true, edit/delete, vector search) | ✅ | ⚠️ Partial | ⚠️ Partial |
+| **Voice + vision** (STT/TTS, PDF image understanding) | ✅ | ⚠️ Partial | ❌ |
+| **Open & free** (Apache 2.0, usage tracking, no account) | ✅ | ❌ | ⚠️ Partial |
 
 ## Features
 
