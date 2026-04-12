@@ -50,6 +50,7 @@ You can run it three ways:
 | **Deterministic memory** (no LLM on read, TS-gated writes, auto-retires stale facts) | ✅ Full | ❌ | ⚠️ Partial |
 | **Multiple brains** (isolated memory namespaces per agent/project/user) | ✅ | ❌ | ❌ |
 | **Runs locally** (own LLM, local models, no signup) | ✅ | ❌ | ❌ |
+| **LLM agnostic** (Ollama, Anthropic, OpenAI, xAI, any OpenAI-compatible) | ✅ | ❌ | ⚠️ Partial |
 | **Temporal + editable** (knows when facts were true, edit/delete, vector search) | ✅ | ⚠️ Partial | ⚠️ Partial |
 | **Voice + vision** (STT/TTS, PDF image understanding) | ✅ | ⚠️ Partial | ❌ |
 | **Open & free** (Apache 2.0, usage tracking, no account) | ✅ | ❌ | ⚠️ Partial |
