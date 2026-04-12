@@ -35,13 +35,21 @@ export async function POST(req: NextRequest) {
   return Response.json({ ok: true, name: slug, emoji: emoji || "⭐" });
 }
 
-/** DELETE /api/brains — delete a brain */
+/** DELETE /api/brains — delete a brain and ALL its data */
 export async function DELETE(req: NextRequest) {
   const { name } = (await req.json()) as { name: string };
   if (!name || name === "default") return Response.json({ error: "cannot delete default brain" }, { status: 400 });
 
   const userId = await getBaseUserId();
+  const brainUserId = `${userId}::${name}`;
+
+  // Delete all data for this brain (order matters for foreign keys)
+  await query(`DELETE FROM s2m_transcript_chunks WHERE user_id = $1`, [brainUserId]);
+  await query(`DELETE FROM s2m_user_facts WHERE user_id = $1`, [brainUserId]);
+  await query(`DELETE FROM s2m_chats WHERE user_id = $1`, [brainUserId]);
+  await query(`DELETE FROM s2m_user_profiles WHERE user_id = $1`, [brainUserId]);
   await query(`DELETE FROM s2m_brains WHERE user_id = $1 AND name = $2`, [userId, name]);
+
   return Response.json({ ok: true });
 }
 

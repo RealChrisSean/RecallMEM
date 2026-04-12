@@ -63,16 +63,18 @@ export default function SettingsPage() {
   const [ttsSaved, setTtsSaved] = useState(false);
   const [deepgramKey, setDeepgramKey] = useState("");
   const [deepgramConfigured, setDeepgramConfigured] = useState(false);
+  const [voiceChatMode, setVoiceChatMode] = useState("separate");
 
   useEffect(() => {
     fetch("/api/tts")
       .then((r) => r.json())
-      .then((d: { available: { xai: boolean; openai: boolean; deepgram: boolean; browser: boolean }; voices: Record<string, string[]>; settings: { provider: string; voice: string | null; sttProvider: string } }) => {
+      .then((d: { available: { xai: boolean; openai: boolean; deepgram: boolean; browser: boolean }; voices: Record<string, string[]>; settings: { provider: string; voice: string | null; sttProvider: string; voiceChatMode?: string } }) => {
         setTtsAvailable(d.available);
         setTtsVoices(d.voices);
         setTtsProvider(d.settings.provider || "auto");
         setTtsVoice(d.settings.voice || "");
         setSttProvider(d.settings.sttProvider || "whisper");
+        setVoiceChatMode(d.settings.voiceChatMode || "separate");
         setDeepgramConfigured(d.available.deepgram);
       })
       .catch(() => {});
@@ -105,6 +107,11 @@ export default function SettingsPage() {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key: "stt_provider", value: sttProvider }),
+    });
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "voice_chat_mode", value: voiceChatMode }),
     });
     setTtsSaved(true);
     setTimeout(() => setTtsSaved(false), 2000);
@@ -695,6 +702,32 @@ export default function SettingsPage() {
                   <option value="deepgram" disabled={!ttsAvailable.deepgram}>Deepgram Nova-3 ($0.0043/min){!ttsAvailable.deepgram ? " -- add API key above" : ""}</option>
                 </select>
               </div>
+            </div>
+
+            <hr className="border-zinc-200 dark:border-zinc-800" />
+
+            {/* Voice Chat Mode */}
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3">Voice Chat (phone icon)</h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
+                Click the phone icon next to the mic button for a real-time voice conversation. Choose how it works:
+              </p>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+                  Mode
+                </label>
+                <select
+                  value={voiceChatMode}
+                  onChange={(e) => setVoiceChatMode(e.target.value)}
+                  className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100"
+                >
+                  <option value="separate">Separate STT + LLM + TTS (~$0.02/min, more control)</option>
+                  <option value="voice-agent" disabled={!ttsAvailable.xai}>Grok Voice Agent ($0.05/min, real-time, seamless){!ttsAvailable.xai ? " -- no xAI key" : ""}</option>
+                </select>
+              </div>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2">
+                &quot;Separate&quot; uses your STT + TTS choices above with your selected chat LLM. &quot;Voice Agent&quot; is an all-in-one real-time WebSocket to Grok -- faster but only uses Grok as the brain.
+              </p>
             </div>
 
             <div className="flex items-center gap-3 pt-2">

@@ -9,6 +9,8 @@ import { MODEL_OPTIONS, type ModelId } from "@/lib/llm-config";
 import { AppFooter } from "@/components/AppFooter";
 import { Logo } from "@/components/Logo";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import dynamic from "next/dynamic";
+const VoiceAgent = dynamic(() => import("@/components/VoiceAgent"), { ssr: false });
 
 const MODEL_STORAGE_KEY = "recallmem_selected_model";
 const SIDEBAR_STORAGE_KEY = "recallmem_sidebar_open";
@@ -75,6 +77,7 @@ export default function ChatPage() {
 
   const [showBrainHint, setShowBrainHint] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [showVoiceAgent, setShowVoiceAgent] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingLoopRef = useRef<boolean>(false);
@@ -190,12 +193,17 @@ export default function ChatPage() {
     dismissIdlePrompt();
   }
 
-  // TTS: tries OpenAI first (if API key configured), falls back to browser SpeechSynthesis.
+  // TTS: chunked playback — splits long text into ~500 char pieces,
+  // fetches the first chunk immediately so audio starts fast, then
+  // pre-fetches remaining chunks in the background and plays them
+  // back-to-back seamlessly.
   const activeSpeechRef = useRef<HTMLAudioElement | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [ttsLoading, setTtsLoading] = useState(false);
+  const ttsAbortRef = useRef(false);
 
   function stopSpeaking() {
+    ttsAbortRef.current = true;
     if (activeSpeechRef.current) {
       activeSpeechRef.current.pause();
       activeSpeechRef.current.currentTime = 0;
@@ -203,16 +211,27 @@ export default function ChatPage() {
     }
     window.speechSynthesis.cancel();
     setIsSpeaking(false);
+    setTtsLoading(false);
   }
 
-  async function speakText(text: string) {
-    // If already speaking or loading, stop instead
-    if (isSpeaking || ttsLoading) { stopSpeaking(); setTtsLoading(false); return; }
+  // Split text into chunks at sentence boundaries, ~500 chars each
+  function splitTtsChunks(text: string, maxLen = 500): string[] {
+    const sentences = text.split(/(?<=[.!?])\s+/);
+    const chunks: string[] = [];
+    let buf = "";
+    for (const s of sentences) {
+      if (buf.length + s.length + 1 > maxLen && buf) {
+        chunks.push(buf.trim());
+        buf = s;
+      } else {
+        buf = buf ? buf + " " + s : s;
+      }
+    }
+    if (buf.trim()) chunks.push(buf.trim());
+    return chunks.length > 0 ? chunks : [text];
+  }
 
-    setTtsLoading(true);
-
-    // Fetch TTS audio from API
-    let audioBlob: Blob | null = null;
+  async function fetchTtsAudio(text: string): Promise<Blob | null> {
     try {
       const res = await fetch("/api/tts", {
         method: "POST",
@@ -220,50 +239,79 @@ export default function ChatPage() {
         body: JSON.stringify({ text }),
       });
       if (res.ok && res.headers.get("Content-Type")?.includes("audio")) {
-        audioBlob = await res.blob();
+        return res.blob();
       }
-    } catch { /* fall through to browser TTS */ }
+    } catch { /* fall through */ }
+    return null;
+  }
 
-    if (audioBlob && audioBlob.size > 0) {
-      const url = URL.createObjectURL(audioBlob);
+  function getAudioEl(): HTMLAudioElement {
+    let el = document.getElementById("recallmem-tts-audio") as HTMLAudioElement | null;
+    if (!el) {
+      el = document.createElement("audio");
+      el.id = "recallmem-tts-audio";
+      document.body.appendChild(el);
+    }
+    return el;
+  }
 
-      // Get or create persistent audio element to avoid autoplay issues
-      let audioEl = document.getElementById("recallmem-tts-audio") as HTMLAudioElement | null;
-      if (!audioEl) {
-        audioEl = document.createElement("audio");
-        audioEl.id = "recallmem-tts-audio";
-        document.body.appendChild(audioEl);
-      }
+  async function speakText(text: string) {
+    // If already speaking or loading, stop instead
+    if (isSpeaking || ttsLoading) { stopSpeaking(); return; }
 
-      audioEl.src = url;
-      audioEl.onended = () => {
-        URL.revokeObjectURL(url);
-        activeSpeechRef.current = null;
-        setIsSpeaking(false);
-      };
-      activeSpeechRef.current = audioEl;
+    ttsAbortRef.current = false;
+    setTtsLoading(true);
 
+    const chunks = splitTtsChunks(text);
+
+    // Fetch first chunk immediately
+    const firstBlob = await fetchTtsAudio(chunks[0]);
+
+    if (!firstBlob || ttsAbortRef.current) {
+      // No cloud TTS — fallback to browser
       setTtsLoading(false);
       setIsSpeaking(true);
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.1;
+      utterance.onend = () => setIsSpeaking(false);
+      window.speechSynthesis.speak(utterance);
+      return;
+    }
+
+    setTtsLoading(false);
+    setIsSpeaking(true);
+
+    // Pre-fetch remaining chunks in background
+    const blobPromises = chunks.slice(1).map((c) => fetchTtsAudio(c));
+
+    // Play chunks sequentially
+    const allBlobs: (Blob | null)[] = [firstBlob];
+    for (const p of blobPromises) {
+      allBlobs.push(await p);
+    }
+
+    for (const blob of allBlobs) {
+      if (ttsAbortRef.current || !blob) break;
+
+      const url = URL.createObjectURL(blob);
+      const audioEl = getAudioEl();
+      audioEl.src = url;
+      activeSpeechRef.current = audioEl;
 
       try {
-        await audioEl.play();
-        return;
-      } catch (e) {
-        console.warn("[tts] play failed:", e);
+        await new Promise<void>((resolve, reject) => {
+          audioEl.onended = () => { URL.revokeObjectURL(url); resolve(); };
+          audioEl.onerror = () => { URL.revokeObjectURL(url); reject(); };
+          audioEl.play().catch(reject);
+        });
+      } catch {
         URL.revokeObjectURL(url);
-        activeSpeechRef.current = null;
+        break;
       }
     }
 
-    // Fallback: browser SpeechSynthesis
-    setTtsLoading(false);
-    setIsSpeaking(true);
     activeSpeechRef.current = null;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.1;
-    utterance.onend = () => setIsSpeaking(false);
-    window.speechSynthesis.speak(utterance);
+    if (!ttsAbortRef.current) setIsSpeaking(false);
   }
 
   // Stop TTS on page unload / refresh
@@ -395,7 +443,19 @@ export default function ChatPage() {
     setActiveBrain(slug);
   }
 
-  function switchBrain(slug: string) {
+  async function switchBrain(slug: string) {
+    // Finalize current conversation before switching (same as newChat/loadChat)
+    if (chatId && messages.length >= 2) {
+      try {
+        await fetch("/api/chat/finalize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chatId }),
+        });
+      } catch (err) {
+        console.error("Finalize on brain switch failed:", err);
+      }
+    }
     setActiveBrain(slug);
     setMessages([]);
     setChatId(null);
@@ -491,24 +551,24 @@ export default function ChatPage() {
   // the server and the frontend has no way to know exactly when it finishes.
   // Polls every 700ms for up to 15 seconds.
   async function pollForChatTitle(targetChatId: string) {
-    const POLL_INTERVAL = 700;
-    const TIMEOUT_MS = 15000;
+    const TIMEOUT_MS = 20000;
     const startedAt = Date.now();
 
     while (Date.now() - startedAt < TIMEOUT_MS) {
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+      // Poll fast: 300ms intervals for the first 5s, then 1s after
+      const elapsed = Date.now() - startedAt;
+      const interval = elapsed < 5000 ? 300 : 1000;
+      await new Promise((r) => setTimeout(r, interval));
+
       try {
         const res = await fetch("/api/chats");
         if (!res.ok) continue;
         const data = (await res.json()) as ChatListItem[];
         setChatList(data);
         const target = data.find((c) => c.id === targetChatId);
-        if (target?.title) {
-          // Title generated, stop polling
-          return;
-        }
+        if (target?.title) return;
       } catch {
-        // Network blip, keep trying
+        // keep trying
       }
     }
   }
@@ -799,6 +859,74 @@ export default function ChatPage() {
     chatIdRef.current = chatId;
   }, [chatId]);
 
+  // Save draft input as you type — recover if window closes mid-typing
+  useEffect(() => {
+    if (input) {
+      localStorage.setItem("recallmem.draftInput", input);
+    } else {
+      localStorage.removeItem("recallmem.draftInput");
+    }
+  }, [input]);
+
+  // Restore draft input on mount
+  useEffect(() => {
+    const draft = localStorage.getItem("recallmem.draftInput");
+    if (draft) setInput(draft);
+  }, []);
+
+  // SAFETY NET: backup messages to localStorage, throttled to every 5s.
+  const lastBackupRef = useRef(0);
+  useEffect(() => {
+    if (chatId && messages.length >= 2) {
+      const now = Date.now();
+      if (now - lastBackupRef.current < 5000) return;
+      lastBackupRef.current = now;
+      try {
+        localStorage.setItem("recallmem.chatBackup", JSON.stringify({
+          chatId,
+          messages: messages.map((m) => ({ role: m.role, content: m.content })),
+          savedAt: now,
+        }));
+      } catch { /* localStorage full or unavailable */ }
+    }
+  }, [chatId, messages]);
+
+  // On mount: check for unsaved backup. If the DB has 0 messages for that
+  // chat but we have messages in localStorage, re-save them to the server.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("recallmem.chatBackup");
+      if (!raw) return;
+      const backup = JSON.parse(raw) as { chatId: string; messages: { role: string; content: string }[]; savedAt: number };
+      // Only recover if backup is less than 24 hours old
+      if (Date.now() - backup.savedAt > 24 * 60 * 60 * 1000) {
+        localStorage.removeItem("recallmem.chatBackup");
+        return;
+      }
+      // Check if the chat in DB has messages
+      fetch(`/api/chats/${backup.chatId}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((chat: { message_count?: number } | null) => {
+          if (chat && chat.message_count === 0 && backup.messages.length >= 2) {
+            console.warn("[recovery] Found unsaved chat backup, re-saving to server...");
+            fetch("/api/chat/recover", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ chatId: backup.chatId, messages: backup.messages }),
+            }).then(() => {
+              console.log("[recovery] Chat recovered successfully");
+              localStorage.removeItem("recallmem.chatBackup");
+              refreshChatList();
+            }).catch(() => {});
+          } else {
+            // Chat already has messages, backup not needed
+            localStorage.removeItem("recallmem.chatBackup");
+          }
+        })
+        .catch(() => {});
+    } catch { /* ignore */ }
+  }, []);
+
   // On tab close: best-effort save of memory using sendBeacon (fire-and-forget)
   useEffect(() => {
     function handleBeforeUnload() {
@@ -923,7 +1051,7 @@ export default function ChatPage() {
   }
 
   // Resolve a pending text/PDF file by sending it to /api/upload
-  async function resolvePendingFile(file: File): Promise<string | null> {
+  async function resolvePendingFile(file: File): Promise<{ content: string; images?: string[] } | null> {
     try {
       const formData = new FormData();
       formData.append("file", file);
@@ -933,8 +1061,8 @@ export default function ChatPage() {
         setUploadError(err.error || `Failed to process ${file.name}`);
         return null;
       }
-      const data = (await res.json()) as { content: string };
-      return data.content;
+      const data = (await res.json()) as { content: string; images?: string[] };
+      return { content: data.content, images: data.images };
     } catch {
       setUploadError(`Upload failed: ${file.name}`);
       return null;
@@ -999,6 +1127,7 @@ export default function ChatPage() {
 
       // Text or PDF: resolve content now if not already resolved
       let content = file.content;
+      let pdfImages: string[] | undefined;
       if (!content) {
         const raw = pendingRawFiles[i];
         if (!raw) {
@@ -1009,11 +1138,19 @@ export default function ChatPage() {
         if (resolved == null) {
           return;
         }
-        content = resolved;
+        content = resolved.content;
+        pdfImages = resolved.images;
       }
 
-      const header = messageContent ? "\n\n" : "";
-      messageContent += `${header}--- ${file.name} ---\n${content}\n--- end ${file.name} ---`;
+      if (content) {
+        const header = messageContent ? "\n\n" : "";
+        messageContent += `${header}--- ${file.name} ---\n${content}\n--- end ${file.name} ---`;
+      }
+
+      // PDF page images — send to the LLM so it can see charts, diagrams, etc.
+      if (pdfImages?.length) {
+        images.push(...pdfImages);
+      }
     }
 
     // Anthropic requires non-empty content on every message.
@@ -1120,6 +1257,7 @@ export default function ChatPage() {
               };
               if (chunk.chatId) {
                 setChatId(chunk.chatId);
+                chatIdRef.current = chunk.chatId; // set ref immediately, don't wait for re-render
                 continue;
               }
               if (chunk.error) {
@@ -1556,7 +1694,7 @@ export default function ChatPage() {
               disabled={noChatBackend}
               className="flex-1 resize-none bg-transparent py-3 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none disabled:opacity-50"
             />
-            {/* Mic button — real-time whisper-stream transcription */}
+            {/* Mic button — STT dictation */}
             <button
               type="button"
               onClick={isRecording ? stopRecording : startRecording}
@@ -1572,6 +1710,18 @@ export default function ChatPage() {
                 <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
                 <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                 <line x1="12" y1="19" x2="12" y2="22" />
+              </svg>
+            </button>
+            {/* Voice Agent button — real-time voice conversation */}
+            <button
+              type="button"
+              onClick={() => setShowVoiceAgent(true)}
+              disabled={noChatBackend || isStreaming || isRecording}
+              className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              title="Voice chat (Grok)"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
               </svg>
             </button>
             {isStreaming ? (
@@ -1735,6 +1885,11 @@ export default function ChatPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Voice Agent modal */}
+      {showVoiceAgent && (
+        <VoiceAgent onClose={() => setShowVoiceAgent(false)} />
       )}
 
       {/* First-time web search privacy warning (local providers only) */}

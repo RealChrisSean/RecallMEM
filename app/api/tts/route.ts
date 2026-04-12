@@ -31,6 +31,7 @@ export async function GET() {
   const ttsProvider = await getSetting("tts_provider");
   const ttsVoice = await getSetting("tts_voice");
   const sttProvider = await getSetting("stt_provider");
+  const voiceChatMode = await getSetting("voice_chat_mode");
 
   return Response.json({
     available: { xai: hasXAI, openai: hasOpenAI, deepgram: hasDeepgram, browser: true },
@@ -39,6 +40,7 @@ export async function GET() {
       provider: ttsProvider || (hasXAI ? "xai" : hasOpenAI ? "openai" : "browser"),
       voice: ttsVoice || null,
       sttProvider: sttProvider || (hasDeepgram ? "deepgram" : "whisper"),
+      voiceChatMode: voiceChatMode || "separate",
     },
   });
 }

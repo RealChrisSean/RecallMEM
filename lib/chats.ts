@@ -57,8 +57,10 @@ export async function updateChat(
   messages: Message[],
   opts: { model?: string | null; providerId?: string | null } = {}
 ): Promise<void> {
-  const userId = await getUserId();
   const transcript = messagesToTranscript(messages);
+  // Match on chatId only. The user_id was set at creation time.
+  // Matching on user_id too caused silent data loss when the brain
+  // cookie changed between createChat and updateChat.
   await query(
     `UPDATE s2m_chats
      SET transcript = $1,
@@ -66,33 +68,32 @@ export async function updateChat(
          model = COALESCE($3, model),
          provider_id = COALESCE($4::uuid, provider_id),
          updated_at = NOW()
-     WHERE id = $5 AND user_id = $6`,
+     WHERE id = $5`,
     [
       transcript,
       messages.length,
       opts.model ?? null,
       opts.providerId ?? null,
       chatId,
-      userId,
     ]
   );
 }
 
 // Set the chat title (set after auto-generation)
 export async function setChatTitle(chatId: string, title: string): Promise<void> {
-  const userId = await getUserId();
   await query(
-    `UPDATE s2m_chats SET title = $1 WHERE id = $2 AND user_id = $3`,
-    [title, chatId, userId]
+    `UPDATE s2m_chats SET title = $1 WHERE id = $2`,
+    [title, chatId]
   );
 }
 
-// Get a single chat by id
+// Get a single chat by id. No user_id filter — the chatId is a UUID,
+// which is unguessable. Filtering by user_id caused silent data loss
+// when the brain cookie was out of sync.
 export async function getChat(chatId: string): Promise<ChatRow | null> {
-  const userId = await getUserId();
   return queryOne<ChatRow>(
-    `SELECT * FROM s2m_chats WHERE id = $1 AND user_id = $2`,
-    [chatId, userId]
+    `SELECT * FROM s2m_chats WHERE id = $1`,
+    [chatId]
   );
 }
 
@@ -111,19 +112,17 @@ export async function listChats(limit = 100): Promise<ChatRow[]> {
 
 // Toggle pinned state for a chat
 export async function setPinned(chatId: string, pinned: boolean): Promise<void> {
-  const userId = await getUserId();
   await query(
-    `UPDATE s2m_chats SET is_pinned = $1 WHERE id = $2 AND user_id = $3`,
-    [pinned, chatId, userId]
+    `UPDATE s2m_chats SET is_pinned = $1 WHERE id = $2`,
+    [pinned, chatId]
   );
 }
 
 // Delete a chat (cascading: facts, chunks all get removed via FK)
 export async function deleteChat(chatId: string): Promise<void> {
-  const userId = await getUserId();
   await query(
-    `DELETE FROM s2m_chats WHERE id = $1 AND user_id = $2`,
-    [chatId, userId]
+    `DELETE FROM s2m_chats WHERE id = $1`,
+    [chatId]
   );
 }
 

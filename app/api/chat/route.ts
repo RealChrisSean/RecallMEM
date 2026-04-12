@@ -219,15 +219,14 @@ export async function POST(req: NextRequest) {
               }
             }
             if (chunk.done) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
-              controller.close();
+              // Do ALL saves and post-processing BEFORE closing the stream.
+              // Next.js kills the execution context after controller.close(),
+              // so fire-and-forget calls after close() never complete.
 
-              generation?.end({
-                output: assistantContent,
-              });
+              generation?.end({ output: assistantContent });
               trace?.update({ output: assistantContent });
 
-              // Log usage estimate (~4 chars per token)
+              // Log usage
               const inputChars = llmMessages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
               const outputChars = assistantContent.length;
               let usageProvider = "ollama";
@@ -240,29 +239,26 @@ export async function POST(req: NextRequest) {
               logUsage({ provider: usageProvider, service: "chat", model: body.model || undefined, units: tokensIn, unitType: "tokens_in" });
               logUsage({ provider: usageProvider, service: "chat", model: body.model || undefined, units: tokensOut, unitType: "tokens_out" });
 
-              // Save updated chat with the new assistant message
+              // Save chat
               const fullMessages: Message[] = [
                 ...body.messages,
                 { role: "assistant", content: assistantContent },
               ];
-              // Record which model + provider was used so the post-chat
-              // pipeline can extract facts with the same LLM the user
-              // was actually chatting with.
               await updateChat(finalChatId, fullMessages, {
                 model: body.model || null,
                 providerId: body.providerId || null,
               });
 
-              // Fire-and-forget: generate the chat title right after the first
-              // exchange so the sidebar shows a real title immediately instead
-              // of "Untitled". Skips if the chat already has a title.
-              // Uses the same provider as the chat (so cloud-only users without
-              // Ollama installed still get titles via Claude/GPT).
-              generateTitleIfMissing(finalChatId, {
+              // Generate title — AWAIT it so it completes before stream closes
+              await generateTitleIfMissing(finalChatId, {
                 providerId: body.providerId,
               }).catch((err) =>
                 console.error("[chat] title generation error:", err)
               );
+
+              // NOW close the stream after everything is saved
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+              controller.close();
 
               // Live fact extraction: kick off a background pass against the
               // updated transcript so new facts (and an updated profile)
