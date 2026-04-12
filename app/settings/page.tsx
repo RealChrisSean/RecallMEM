@@ -63,6 +63,8 @@ export default function SettingsPage() {
   const [ttsSaved, setTtsSaved] = useState(false);
   const [deepgramKey, setDeepgramKey] = useState("");
   const [deepgramConfigured, setDeepgramConfigured] = useState(false);
+  const [xaiVoiceKey, setXaiVoiceKey] = useState("");
+  const [xaiVoiceConfigured, setXaiVoiceConfigured] = useState(false);
   const [voiceChatMode, setVoiceChatMode] = useState("separate");
 
   useEffect(() => {
@@ -76,6 +78,8 @@ export default function SettingsPage() {
         setSttProvider(d.settings.sttProvider || "whisper");
         setVoiceChatMode(d.settings.voiceChatMode || "separate");
         setDeepgramConfigured(d.available.deepgram);
+        // Check xAI voice key separately
+        fetch("/api/settings?key=xai_voice_api_key").then(r => r.json()).then((s: { configured?: boolean }) => setXaiVoiceConfigured(!!s.configured)).catch(() => {});
       })
       .catch(() => {});
   }, []);
@@ -90,6 +94,18 @@ export default function SettingsPage() {
     setDeepgramConfigured(true);
     setDeepgramKey("");
     setTtsAvailable((prev) => ({ ...prev, deepgram: true }));
+  }
+
+  async function saveXaiVoiceKey() {
+    if (!xaiVoiceKey.trim()) return;
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "xai_voice_api_key", value: xaiVoiceKey.trim() }),
+    });
+    setXaiVoiceConfigured(true);
+    setXaiVoiceKey("");
+    setTtsAvailable((prev) => ({ ...prev, xai: true }));
   }
 
   async function saveVoiceSettings() {
@@ -608,6 +624,37 @@ export default function SettingsPage() {
               </div>
               {deepgramConfigured && (
                 <p className="text-xs text-green-600 dark:text-green-400 mt-1">Deepgram key configured</p>
+              )}
+            </div>
+
+            {/* xAI Voice API key */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+                xAI Voice API Key
+              </label>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
+                xAI requires a separate API key with Voice endpoint access for TTS. Create one at{" "}
+                <a href="https://console.x.ai" target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 underline">console.x.ai</a>
+                {" "}with the Voice endpoint enabled.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={xaiVoiceKey}
+                  onChange={(e) => setXaiVoiceKey(e.target.value)}
+                  placeholder={xaiVoiceConfigured ? "••••••••  (paste a new key to replace)" : "Paste your xAI Voice API key"}
+                  className="flex-1 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100"
+                />
+                <button
+                  onClick={saveXaiVoiceKey}
+                  disabled={!xaiVoiceKey.trim()}
+                  className="px-4 py-2 text-sm font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors disabled:opacity-40"
+                >
+                  Save
+                </button>
+              </div>
+              {xaiVoiceConfigured && (
+                <p className="text-xs text-green-600 dark:text-green-400 mt-1">xAI Voice key configured</p>
               )}
             </div>
 

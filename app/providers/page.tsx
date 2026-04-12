@@ -97,6 +97,8 @@ export default function ProvidersPage() {
   const [model, setModel] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editKey, setEditKey] = useState("");
   const [testResult, setTestResult] = useState<
     { ok: boolean; message: string } | null
   >(null);
@@ -245,6 +247,22 @@ export default function ProvidersPage() {
     }
   }
 
+  async function updateProviderKey(id: string) {
+    if (!editKey.trim()) return;
+    try {
+      await fetch(`/api/providers/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: editKey.trim() }),
+      });
+      setEditingId(null);
+      setEditKey("");
+      load();
+    } catch (err) {
+      console.error("Failed to update:", err);
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen text-zinc-500 dark:text-zinc-400">
@@ -308,42 +326,73 @@ export default function ProvidersPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              {providers.map((p) => (
+              {providers.map((p) => {
+                const isEditing = editingId === p.id;
+                return (
                 <div
                   key={p.id}
-                  className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 flex items-start justify-between gap-3"
+                  className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4"
                 >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                        {p.label}
-                      </span>
-                      <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
-                        {TYPE_LABELS[p.type]}
-                      </span>
-                    </div>
-                    <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                      Model: <code className="font-mono">{p.model}</code>
-                    </div>
-                    {p.base_url && (
-                      <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                        URL: <code className="font-mono">{p.base_url}</code>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                          {p.label}
+                        </span>
+                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
+                          {TYPE_LABELS[p.type]}
+                        </span>
                       </div>
-                    )}
-                    {p.api_key_preview && (
-                      <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                        Key: <code className="font-mono">{p.api_key_preview}</code>
+                      <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                        Model: <code className="font-mono">{p.model}</code>
                       </div>
-                    )}
+                      {p.base_url && (
+                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                          URL: <code className="font-mono">{p.base_url}</code>
+                        </div>
+                      )}
+                      {p.api_key_preview && (
+                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                          Key: <code className="font-mono">{p.api_key_preview}</code>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => { setEditingId(isEditing ? null : p.id); setEditKey(""); }}
+                        className="text-xs px-2 py-1 rounded text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                      >
+                        {isEditing ? "Cancel" : "Edit key"}
+                      </button>
+                      <button
+                        onClick={() => deleteProvider(p.id)}
+                        className="text-xs px-2 py-1 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    onClick={() => deleteProvider(p.id)}
-                    className="text-xs px-2 py-1 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
-                  >
-                    Delete
-                  </button>
+                  {isEditing && (
+                    <div className="flex gap-2 mt-3">
+                      <input
+                        type="password"
+                        value={editKey}
+                        onChange={(e) => setEditKey(e.target.value)}
+                        placeholder="Paste new API key"
+                        className="flex-1 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-1.5 text-sm text-zinc-900 dark:text-zinc-100"
+                      />
+                      <button
+                        onClick={() => updateProviderKey(p.id)}
+                        disabled={!editKey.trim()}
+                        className="px-3 py-1.5 text-sm font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors disabled:opacity-40"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

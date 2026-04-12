@@ -255,12 +255,15 @@ export default function ChatPage() {
     return el;
   }
 
-  async function speakText(text: string) {
+  const isSpeakingRef = useRef(false);
+  const ttsLoadingRef = useRef(false);
+
+  const speakText = useCallback(async function speakText(text: string) {
     // If already speaking or loading, stop instead
-    if (isSpeaking || ttsLoading) { stopSpeaking(); return; }
+    if (isSpeakingRef.current || ttsLoadingRef.current) { stopSpeaking(); return; }
 
     ttsAbortRef.current = false;
-    setTtsLoading(true);
+    setTtsLoading(true); ttsLoadingRef.current = true;
 
     const chunks = splitTtsChunks(text);
 
@@ -269,17 +272,17 @@ export default function ChatPage() {
 
     if (!firstBlob || ttsAbortRef.current) {
       // No cloud TTS — fallback to browser
-      setTtsLoading(false);
-      setIsSpeaking(true);
+      setTtsLoading(false); ttsLoadingRef.current = false;
+      setIsSpeaking(true); isSpeakingRef.current = true;
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 1.1;
-      utterance.onend = () => setIsSpeaking(false);
+      utterance.onend = () => { setIsSpeaking(false); isSpeakingRef.current = false; };
       window.speechSynthesis.speak(utterance);
       return;
     }
 
-    setTtsLoading(false);
-    setIsSpeaking(true);
+    setTtsLoading(false); ttsLoadingRef.current = false;
+    setIsSpeaking(true); isSpeakingRef.current = true;
 
     // Pre-fetch remaining chunks in background
     const blobPromises = chunks.slice(1).map((c) => fetchTtsAudio(c));
@@ -311,8 +314,8 @@ export default function ChatPage() {
     }
 
     activeSpeechRef.current = null;
-    if (!ttsAbortRef.current) setIsSpeaking(false);
-  }
+    if (!ttsAbortRef.current) { setIsSpeaking(false); isSpeakingRef.current = false; }
+  }, []);
 
   // Stop TTS on page unload / refresh
   useEffect(() => {
@@ -1524,7 +1527,7 @@ export default function ChatPage() {
               </p>
             </div>
           ) : (
-            messages.map((msg, i) => <MessageBubble key={i} message={msg} onSpeak={speakText} isSpeaking={isSpeaking} ttsLoading={ttsLoading} />)
+            messages.map((msg, i) => <MessageBubble key={i} message={msg} onSpeak={speakText} />)
           )}
         </div>
       </div>
@@ -1581,6 +1584,25 @@ export default function ChatPage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* TTS loading indicator */}
+      {ttsLoading && (
+        <div className="flex items-center justify-center gap-2 py-2 px-4 bg-blue-50 dark:bg-blue-950/30 border-t border-blue-200 dark:border-blue-800">
+          <svg className="animate-spin w-4 h-4 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+          </svg>
+          <span className="text-sm text-blue-600 dark:text-blue-400">Loading audio...</span>
+          <button onClick={stopSpeaking} className="text-xs text-blue-500 hover:text-blue-700 underline">Cancel</button>
+        </div>
+      )}
+
+      {/* TTS playing indicator */}
+      {isSpeaking && !ttsLoading && (
+        <div className="flex items-center justify-center gap-2 py-2 px-4 bg-blue-50 dark:bg-blue-950/30 border-t border-blue-200 dark:border-blue-800">
+          <span className="text-sm text-blue-600 dark:text-blue-400">Playing audio</span>
+          <button onClick={stopSpeaking} className="text-xs text-blue-500 hover:text-blue-700 underline">Stop</button>
         </div>
       )}
 
@@ -2536,7 +2558,7 @@ function TrashIcon() {
   );
 }
 
-const MessageBubble = memo(function MessageBubble({ message, onSpeak, isSpeaking, ttsLoading }: { message: Message; onSpeak?: (text: string) => void; isSpeaking?: boolean; ttsLoading?: boolean }) {
+const MessageBubble = memo(function MessageBubble({ message, onSpeak }: { message: Message; onSpeak?: (text: string) => void }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
 
@@ -2607,30 +2629,18 @@ const MessageBubble = memo(function MessageBubble({ message, onSpeak, isSpeaking
         {/* Copy button — inside bubble, top-right, appears on hover */}
         {message.content && (
           <div className={`absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity`}>
-            {/* Speaker button — cloud TTS if available, else browser SpeechSynthesis */}
+            {/* Speaker button — TTS */}
             {!isUser && onSpeak && (
               <button
                 onClick={() => onSpeak(displayContent)}
-                className={`p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-                  ttsLoading ? "text-zinc-400 animate-spin" : isSpeaking ? "text-blue-500" : "text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
-                }`}
-                title={ttsLoading ? "Loading..." : isSpeaking ? "Stop speaking" : "Read aloud"}
+                className="p-1 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                title="Read aloud"
               >
-                {ttsLoading ? (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                  </svg>
-                ) : isSpeaking ? (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <rect x="6" y="6" width="12" height="12" rx="2" />
-                  </svg>
-                ) : (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-                  </svg>
-                )}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                </svg>
               </button>
             )}
           <button

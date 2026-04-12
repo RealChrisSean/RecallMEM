@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 
 // Allowlist of settings keys we expose via the API. Prevents random keys
 // from being written through the public route.
-const ALLOWED_KEYS = new Set(["brave_search_api_key", "tts_provider", "tts_voice", "stt_provider", "deepgram_api_key", "voice_chat_mode"]);
+const ALLOWED_KEYS = new Set(["brave_search_api_key", "tts_provider", "tts_voice", "stt_provider", "deepgram_api_key", "xai_voice_api_key", "voice_chat_mode"]);
 
 // GET /api/settings?key=brave_search_api_key
 // Returns { configured: boolean } - we never echo the value back so a

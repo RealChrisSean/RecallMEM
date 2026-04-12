@@ -25,6 +25,8 @@ export async function GET() {
   const providers = await listProviders();
   const hasOpenAI = providers.some((p) => p.type === "openai" && p.api_key);
   const hasXAI = providers.some((p) => p.type === "openai-compatible" && p.api_key && p.base_url?.includes("x.ai"));
+  const xaiVoiceKey = await getSetting("xai_voice_api_key");
+  const hasXAIVoice = hasXAI || !!xaiVoiceKey;
   const deepgramKey = await getSetting("deepgram_api_key");
   const hasDeepgram = !!deepgramKey;
 
@@ -34,7 +36,7 @@ export async function GET() {
   const voiceChatMode = await getSetting("voice_chat_mode");
 
   return Response.json({
-    available: { xai: hasXAI, openai: hasOpenAI, deepgram: hasDeepgram, browser: true },
+    available: { xai: hasXAIVoice, openai: hasOpenAI, deepgram: hasDeepgram, browser: true },
     voices: VOICES,
     settings: {
       provider: ttsProvider || (hasXAI ? "xai" : hasOpenAI ? "openai" : "browser"),
@@ -60,6 +62,8 @@ export async function POST(req: NextRequest) {
   const xai = providers.find((p) => p.type === "openai-compatible" && p.api_key && p.base_url?.includes("x.ai"));
   const openai = providers.find((p) => p.type === "openai" && p.api_key);
   const deepgramKey = await getSetting("deepgram_api_key");
+  // xAI Voice endpoint needs a separate API key with Voice permission
+  const xaiVoiceKey = await getSetting("xai_voice_api_key") || xai?.api_key;
 
   // Determine which provider to use (setting > auto-detect by cost)
   const provider = ttsProvider || (hasKey(xai) ? "xai" : hasKey(openai) ? "openai" : deepgramKey ? "deepgram" : "browser");
@@ -89,20 +93,25 @@ export async function POST(req: NextRequest) {
   }
 
   // --- xAI Grok ---
-  if ((provider === "xai" || provider === "deepgram") && hasKey(xai)) {
-    const voice = ttsVoice || "eve";
+  // xAI TTS uses /v1/tts with { text, voice, language }, NOT /v1/audio/speech
+  // Voice names are capitalized: Eve, Ara, Rex, Sal, Leo
+  const XAI_VOICES = ["eve", "ara", "rex", "sal", "leo"];
+  if ((provider === "xai" || provider === "deepgram") && xaiVoiceKey) {
+    const rawVoice = ttsVoice || "eve";
+    const voice = XAI_VOICES.includes(rawVoice.toLowerCase())
+      ? rawVoice.charAt(0).toUpperCase() + rawVoice.slice(1).toLowerCase()
+      : "Eve";
     const inputText = text.slice(0, 15000);
-    const res = await fetch("https://api.x.ai/v1/audio/speech", {
+    const res = await fetch("https://api.x.ai/v1/tts", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${xai!.api_key}`,
+        Authorization: `Bearer ${xaiVoiceKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "grok-2-tts",
-        input: inputText,
-        voice: voice,
-        response_format: "mp3",
+        text: inputText,
+        voice,
+        language: "en",
       }),
     });
 
@@ -116,8 +125,10 @@ export async function POST(req: NextRequest) {
   }
 
   // --- OpenAI ---
+  const OPENAI_VOICES = ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"];
   if ((provider === "openai" || provider === "xai" || provider === "deepgram") && hasKey(openai)) {
-    const voice = ttsVoice || "ash";
+    // Use the selected voice only if it's valid for OpenAI, otherwise default to "ash"
+    const voice = (ttsVoice && OPENAI_VOICES.includes(ttsVoice)) ? ttsVoice : "ash";
     const inputText = text.slice(0, 4096);
     const baseUrl = openai!.base_url || "https://api.openai.com";
     const res = await fetch(`${baseUrl}/v1/audio/speech`, {
