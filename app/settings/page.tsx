@@ -704,31 +704,7 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <hr className="border-zinc-200 dark:border-zinc-800" />
-
-            {/* Voice Chat Mode */}
-            <div>
-              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3">Voice Chat (phone icon)</h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
-                Click the phone icon next to the mic button for a real-time voice conversation. Choose how it works:
-              </p>
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
-                  Mode
-                </label>
-                <select
-                  value={voiceChatMode}
-                  onChange={(e) => setVoiceChatMode(e.target.value)}
-                  className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100"
-                >
-                  <option value="separate">Separate STT + LLM + TTS (~$0.02/min, more control)</option>
-                  <option value="voice-agent" disabled={!ttsAvailable.xai}>Grok Voice Agent ($0.05/min, real-time, seamless){!ttsAvailable.xai ? " -- no xAI key" : ""}</option>
-                </select>
-              </div>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2">
-                &quot;Separate&quot; uses your STT + TTS choices above with your selected chat LLM. &quot;Voice Agent&quot; is an all-in-one real-time WebSocket to Grok -- faster but only uses Grok as the brain.
-              </p>
-            </div>
+            {/* Voice Chat Mode — hidden for now, needs more work */}
 
             <div className="flex items-center gap-3 pt-2">
               <button
