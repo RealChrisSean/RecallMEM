@@ -54,6 +54,7 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   images?: string[]; // base64-encoded image data (for vision-capable models)
+  usage?: { inputTokens: number; outputTokens: number; model: string };
 }
 
 export interface AttachedFile {

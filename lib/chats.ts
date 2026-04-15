@@ -1,19 +1,28 @@
 import { query, queryOne, getUserId } from "@/lib/db";
 import type { ChatRow, Message, ModelMode } from "@/lib/types";
 
-// Format a list of messages into a role-prefixed transcript string
+// Format messages to transcript. Uses JSON to preserve usage data.
 export function messagesToTranscript(messages: Message[]): string {
-  return messages
-    .map((m) => `${m.role}: ${m.content}`)
-    .join("\n\n");
+  return JSON.stringify(messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+    ...(m.usage ? { usage: m.usage } : {}),
+  })));
 }
 
-// Parse a transcript string back into Message objects.
-// Handles assistant responses that contain their own \n\n (paragraphs, markdown
-// headings, lists). Any block without a role prefix is treated as a continuation
-// of the most recent message.
+// Parse transcript back into messages. Handles both JSON (new) and
+// plain text (old format) for backwards compatibility.
 export function transcriptToMessages(transcript: string): Message[] {
   if (!transcript) return [];
+
+  // Try JSON first (new format)
+  if (transcript.startsWith("[")) {
+    try {
+      return JSON.parse(transcript) as Message[];
+    } catch { /* fall through to plain text parser */ }
+  }
+
+  // Plain text parser (old format: "user: ...\n\nassistant: ...")
   const blocks = transcript.split(/\n\n+/);
   const messages: Message[] = [];
   let current: Message | null = null;
@@ -27,7 +36,6 @@ export function transcriptToMessages(transcript: string): Message[] {
         content: match[2].trim(),
       };
     } else if (current) {
-      // Continuation paragraph from the previous message
       current.content += `\n\n${block}`;
     }
   }

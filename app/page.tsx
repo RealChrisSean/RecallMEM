@@ -995,7 +995,28 @@ export default function ChatPage() {
   function readImageAsDataURL(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        // Resize to max 2000px on longest side to avoid Anthropic's limit
+        const img = new Image();
+        img.onload = () => {
+          const MAX = 2000;
+          if (img.width <= MAX && img.height <= MAX) {
+            resolve(dataUrl);
+            return;
+          }
+          const scale = MAX / Math.max(img.width, img.height);
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          const ctx = canvas.getContext("2d");
+          if (!ctx) { resolve(dataUrl); return; }
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL("image/jpeg", 0.85));
+        };
+        img.onerror = () => resolve(dataUrl);
+        img.src = dataUrl;
+      };
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
@@ -1238,7 +1259,9 @@ export default function ChatPage() {
         const snapshot = displayedText;
         setMessages((prev) => {
           const updated = [...prev];
+          const last = updated[updated.length - 1];
           updated[updated.length - 1] = {
+            ...last,
             role: "assistant",
             content: snapshot,
           };
@@ -1264,15 +1287,30 @@ export default function ChatPage() {
                 done?: boolean;
                 error?: string;
                 chatId?: string;
+                usage?: { inputTokens: number; outputTokens: number; model: string };
               };
               if (chunk.chatId) {
                 setChatId(chunk.chatId);
-                chatIdRef.current = chunk.chatId; // set ref immediately, don't wait for re-render
+                chatIdRef.current = chunk.chatId;
                 continue;
               }
               if (chunk.error) {
                 pendingText += `Error: ${chunk.error}`;
                 continue;
+              }
+              if (chunk.done && chunk.usage) {
+                // Store usage on the assistant message for display
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last?.role === "assistant") {
+                    updated[updated.length - 1] = {
+                      ...last,
+                      usage: chunk.usage,
+                    };
+                  }
+                  return updated;
+                });
               }
               if (chunk.delta) {
                 pendingText += chunk.delta;
@@ -1293,7 +1331,9 @@ export default function ChatPage() {
           const snapshot = displayedText;
           setMessages((prev) => {
             const updated = [...prev];
+            const last = updated[updated.length - 1];
             updated[updated.length - 1] = {
+              ...last,
               role: "assistant",
               content: snapshot,
             };
@@ -1441,6 +1481,18 @@ export default function ChatPage() {
               Saving memory...
             </span>
           )}
+          {/* Running token total for current chat */}
+          {(() => {
+            const totalIn = messages.reduce((sum, m) => sum + (m.usage?.inputTokens || 0), 0);
+            const totalOut = messages.reduce((sum, m) => sum + (m.usage?.outputTokens || 0), 0);
+            if (totalIn === 0 && totalOut === 0) return null;
+            const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
+            return (
+              <span className="text-[10px] text-zinc-400 font-mono whitespace-nowrap">
+                {fmt(totalIn)} in / {fmt(totalOut)} out
+              </span>
+            );
+          })()}
           <ModelPicker
             modelId={selectedModel}
             providerId={selectedProviderId}
@@ -2670,6 +2722,13 @@ const MessageBubble = memo(function MessageBubble({ message, onSpeak }: { messag
               </svg>
             )}
           </button>
+          </div>
+        )}
+        {/* Token usage pill */}
+        {!isUser && message.usage && (
+          <div className="mt-2 flex items-center gap-2 text-[10px] text-zinc-400">
+            <span className="font-mono">{message.usage.model}</span>
+            <span>{message.usage.inputTokens.toLocaleString()} in / {message.usage.outputTokens.toLocaleString()} out</span>
           </div>
         )}
       </div>

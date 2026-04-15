@@ -1,11 +1,15 @@
 import { query, toVectorString, getUserId } from "@/lib/db";
-import { embed, embedBatch } from "@/lib/embeddings";
+import { embedWithSource, embedBatchWithSource, getEmbeddingSource } from "@/lib/embeddings";
+
+// Which column to use based on embedding source
+function embCol(source: "openai" | "ollama"): string {
+  return source === "openai" ? "embedding_oai" : "embedding";
+}
 
 // Split a transcript into ~1000 char chunks at sentence/message boundaries
 export function chunkTranscript(transcript: string, maxChars = 1000): string[] {
   if (!transcript) return [];
 
-  // Split on message boundaries first (\n\n)
   const messages = transcript.split(/\n\n+/).filter(Boolean);
   const chunks: string[] = [];
   let buffer = "";
@@ -31,25 +35,23 @@ export async function embedAndStoreChunks(
   const chunks = chunkTranscript(transcript);
   if (chunks.length === 0) return 0;
 
-  // Delete existing chunks for this chat (we always replace, so re-saves stay in sync)
   await query(`DELETE FROM s2m_transcript_chunks WHERE chat_id = $1`, [chatId]);
 
-  // Generate embeddings in one batch call
-  const embeddings = await embedBatch(chunks);
+  const results = await embedBatchWithSource(chunks);
+  const col = embCol(results[0].source);
 
-  // Insert all chunks
   for (let i = 0; i < chunks.length; i++) {
     await query(
-      `INSERT INTO s2m_transcript_chunks (user_id, chat_id, chunk_text, chunk_index, embedding)
+      `INSERT INTO s2m_transcript_chunks (user_id, chat_id, chunk_text, chunk_index, ${col})
        VALUES ($1, $2, $3, $4, $5::vector)`,
-      [userId, chatId, chunks[i], i, toVectorString(embeddings[i])]
+      [userId, chatId, chunks[i], i, toVectorString(results[i].vector)]
     );
   }
   return chunks.length;
 }
 
-// Embed a single exchange (user + assistant) and store it. Called after each
-// response so older messages are searchable without re-embedding everything.
+// Embed a single exchange and store it. Called after each response
+// so older messages are searchable via the sliding window.
 export async function embedExchange(
   chatId: string,
   userMessage: string,
@@ -60,11 +62,13 @@ export async function embedExchange(
   const text = `${userMessage}\n${assistantMessage}`.trim();
   if (!text || text.length < 20) return;
 
-  const [embedding] = await embedBatch([text.slice(0, 1000)]);
+  const result = await embedWithSource(text.slice(0, 1000));
+  const col = embCol(result.source);
+
   await query(
-    `INSERT INTO s2m_transcript_chunks (user_id, chat_id, chunk_text, chunk_index, embedding)
+    `INSERT INTO s2m_transcript_chunks (user_id, chat_id, chunk_text, chunk_index, ${col})
      VALUES ($1, $2, $3, $4, $5::vector)`,
-    [userId, chatId, text, exchangeIndex, toVectorString(embedding)]
+    [userId, chatId, text, exchangeIndex, toVectorString(result.vector)]
   );
 }
 
@@ -75,39 +79,38 @@ export async function searchChunksInChat(
   limit = 3
 ): Promise<{ chunk_text: string; distance: number }[]> {
   const userId = await getUserId();
-  const queryEmbedding = await embed(queryText);
-  const vector = toVectorString(queryEmbedding);
+  const result = await embedWithSource(queryText);
+  const col = embCol(result.source);
+  const vector = toVectorString(result.vector);
 
   return query(
-    `SELECT chunk_text, embedding <=> $1::vector AS distance
+    `SELECT chunk_text, ${col} <=> $1::vector AS distance
      FROM s2m_transcript_chunks
-     WHERE user_id = $2 AND chat_id = $3
+     WHERE user_id = $2 AND chat_id = $3 AND ${col} IS NOT NULL
      ORDER BY distance ASC
      LIMIT $4`,
     [vector, userId, chatId, limit]
   );
 }
 
-// Vector search over past transcript chunks for relevant context. Joins
-// against s2m_chats so callers also get the chat's created_at — used by
-// the prompt builder to stamp recalled chunks with their date so the
-// model can tell historical context from current state.
+// Vector search over past transcript chunks for relevant context.
 export async function searchChunks(
   queryText: string,
   excludeChatId: string | null = null,
   limit = 5
 ): Promise<{ chunk_text: string; distance: number; chat_id: string; chat_created_at: Date }[]> {
   const userId = await getUserId();
-  const queryEmbedding = await embed(queryText);
-  const vector = toVectorString(queryEmbedding);
+  const result = await embedWithSource(queryText);
+  const col = embCol(result.source);
+  const vector = toVectorString(result.vector);
 
   if (excludeChatId) {
     return query(
       `SELECT c.chunk_text, c.chat_id, ch.created_at AS chat_created_at,
-              c.embedding <=> $1::vector AS distance
+              c.${col} <=> $1::vector AS distance
        FROM s2m_transcript_chunks c
        JOIN s2m_chats ch ON ch.id = c.chat_id
-       WHERE c.user_id = $2 AND c.chat_id != $3
+       WHERE c.user_id = $2 AND c.chat_id != $3 AND c.${col} IS NOT NULL
        ORDER BY distance ASC
        LIMIT $4`,
       [vector, userId, excludeChatId, limit]
@@ -116,10 +119,10 @@ export async function searchChunks(
 
   return query(
     `SELECT c.chunk_text, c.chat_id, ch.created_at AS chat_created_at,
-            c.embedding <=> $1::vector AS distance
+            c.${col} <=> $1::vector AS distance
      FROM s2m_transcript_chunks c
      JOIN s2m_chats ch ON ch.id = c.chat_id
-     WHERE c.user_id = $2
+     WHERE c.user_id = $2 AND c.${col} IS NOT NULL
      ORDER BY distance ASC
      LIMIT $3`,
     [vector, userId, limit]

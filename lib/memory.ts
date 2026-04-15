@@ -24,12 +24,16 @@ export async function buildMemoryAwareSystemPrompt(
   let recallChunks: { text: string; date: Date }[] = [];
   if (latestUserMessage && latestUserMessage.length > 5) {
     try {
-      const results = await searchChunks(latestUserMessage, excludeChatId, 8);
+      const searchPromise = searchChunks(latestUserMessage, excludeChatId, 8);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("timeout")), 3000)
+      );
+      const results = await Promise.race([searchPromise, timeoutPromise]);
       recallChunks = results
         .filter((r) => r.distance < 0.6)
         .map((r) => ({ text: r.chunk_text, date: r.chat_created_at }));
     } catch (err) {
-      console.error("[memory] vector search failed:", err);
+      console.warn("[memory] vector search timed out, continuing without recalled chunks");
     }
   }
 

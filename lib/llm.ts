@@ -94,6 +94,8 @@ export interface ChatMessage {
 export interface ChatStreamChunk {
   delta: string;
   done: boolean;
+  usage?: { inputTokens: number; outputTokens: number };
+  model?: string; // actual model used (from API response)
 }
 
 export interface ChatOptions {
@@ -118,7 +120,10 @@ async function resolveProvider(
   if (options.providerId) {
     const row = await getProvider(options.providerId);
     if (!row) throw new Error(`Provider not found: ${options.providerId}`);
-    return rowToResolved(row);
+    const resolved = rowToResolved(row);
+    // Override with the model selected from the dropdown, not the one saved on the provider
+    if (options.model) resolved.model = options.model;
+    return resolved;
   }
   // Default: local Ollama
   const mode: ModelMode = options.mode || "standard";
@@ -217,13 +222,28 @@ export async function chat(
   options: ChatOptions = {}
 ): Promise<string> {
   const provider = await resolveProvider(options);
+  let result: string;
   if (provider.type === "anthropic") {
-    return anthropicNonStream(provider, messages);
+    result = await anthropicNonStream(provider, messages);
+  } else if (provider.type === "ollama") {
+    result = await ollamaNonStream(provider, messages);
+  } else {
+    result = await openaiNonStream(provider, messages);
   }
-  if (provider.type === "ollama") {
-    return ollamaNonStream(provider, messages);
-  }
-  return openaiNonStream(provider, messages);
+
+  // Log usage for ALL non-streaming LLM calls (fact extraction, title gen, etc)
+  // so background tasks show up in the usage tracker
+  try {
+    const { logUsage } = await import("@/lib/usage");
+    const usageProvider = provider.type === "openai-compatible" && provider.baseUrl?.includes("x.ai") ? "xai" : provider.type;
+    const inputChars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
+    const tokensIn = Math.round(inputChars / 4);
+    const tokensOut = Math.round(result.length / 4);
+    logUsage({ provider: usageProvider, service: "chat", model: provider.model, units: tokensIn, unitType: "tokens_in" });
+    logUsage({ provider: usageProvider, service: "chat", model: provider.model, units: tokensOut, unitType: "tokens_out" });
+  } catch { /* non-critical */ }
+
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -358,6 +378,7 @@ function openaiBody(
       return { role: m.role, content: m.content };
     }),
     stream,
+    ...(stream ? { stream_options: { include_usage: true } } : {}),
   });
 }
 
@@ -378,6 +399,9 @@ async function* openaiStream(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let actualModel = provider.model;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -389,13 +413,17 @@ async function* openaiStream(
       if (!trimmed.startsWith("data:")) continue;
       const data = trimmed.slice(5).trim();
       if (data === "[DONE]") {
-        yield { delta: "", done: true };
+        yield { delta: "", done: true, usage: { inputTokens, outputTokens }, model: actualModel };
         return;
       }
       try {
-        const json = JSON.parse(data) as {
-          choices?: Array<{ delta?: { content?: string }; finish_reason?: string }>;
-        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const json = JSON.parse(data) as any;
+        if (json.model) actualModel = json.model;
+        if (json.usage) {
+          inputTokens = json.usage.prompt_tokens || 0;
+          outputTokens = json.usage.completion_tokens || 0;
+        }
         const delta = json.choices?.[0]?.delta?.content || "";
         if (delta) yield { delta, done: false };
       } catch {
@@ -403,7 +431,7 @@ async function* openaiStream(
       }
     }
   }
-  yield { delta: "", done: true };
+  yield { delta: "", done: true, usage: { inputTokens, outputTokens }, model: actualModel };
 }
 
 async function openaiNonStream(
@@ -496,6 +524,9 @@ async function* anthropicStream(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let actualModel = provider.model;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -508,15 +539,20 @@ async function* anthropicStream(
       const data = trimmed.slice(5).trim();
       if (!data) continue;
       try {
-        const json = JSON.parse(data) as {
-          type?: string;
-          delta?: { type?: string; text?: string };
-        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const json = JSON.parse(data) as any;
+        if (json.type === "message_start" && json.message) {
+          inputTokens = json.message.usage?.input_tokens || 0;
+          actualModel = json.message.model || actualModel;
+        }
         if (json.type === "content_block_delta" && json.delta?.text) {
           yield { delta: json.delta.text, done: false };
         }
+        if (json.type === "message_delta" && json.usage) {
+          outputTokens = json.usage.output_tokens || 0;
+        }
         if (json.type === "message_stop") {
-          yield { delta: "", done: true };
+          yield { delta: "", done: true, usage: { inputTokens, outputTokens }, model: actualModel };
           return;
         }
       } catch {
@@ -524,7 +560,7 @@ async function* anthropicStream(
       }
     }
   }
-  yield { delta: "", done: true };
+  yield { delta: "", done: true, usage: { inputTokens, outputTokens }, model: actualModel };
 }
 
 async function anthropicNonStream(

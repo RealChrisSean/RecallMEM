@@ -1,5 +1,5 @@
 import { query, queryOne, getUserId, toVectorString } from "@/lib/db";
-import { embed } from "@/lib/embeddings";
+import { embedWithSource, getEmbeddingSource } from "@/lib/embeddings";
 import { chat as llmChat, FAST_MODEL } from "@/lib/llm";
 import type { UserFactRow } from "@/lib/types";
 
@@ -193,7 +193,7 @@ Return the JSON array now:`;
     // Caller's choice wins. Falls back to FAST_MODEL via local Ollama
     // only if neither model nor providerId was passed.
     const llmCallOpts = llmOpts.providerId
-      ? { providerId: llmOpts.providerId }
+      ? { providerId: llmOpts.providerId, model: llmOpts.model }
       : { model: llmOpts.model || FAST_MODEL };
     const response = await llmChat(
       [{ role: "user", content: prompt }],
@@ -273,7 +273,7 @@ Return the JSON object now:`;
 
   try {
     const llmCallOpts = llmOpts.providerId
-      ? { providerId: llmOpts.providerId }
+      ? { providerId: llmOpts.providerId, model: llmOpts.model }
       : { model: llmOpts.model || FAST_MODEL };
     const response = await llmChat(
       [{ role: "user", content: prompt }],
@@ -343,13 +343,15 @@ export async function storeFacts(
     const category = categorize(fact);
     // Generate embedding for vector search (fire-and-forget if it fails)
     let embeddingStr: string | null = null;
+    let embCol = "embedding";
     try {
-      const vec = await embed(fact);
-      embeddingStr = toVectorString(vec);
+      const result = await embedWithSource(fact);
+      embeddingStr = toVectorString(result.vector);
+      embCol = result.source === "openai" ? "embedding_oai" : "embedding";
     } catch { /* non-critical */ }
 
     await query(
-      `INSERT INTO s2m_user_facts (user_id, fact_text, category, source_chat_id, is_active, embedding)
+      `INSERT INTO s2m_user_facts (user_id, fact_text, category, source_chat_id, is_active, ${embCol})
        VALUES ($1, $2, $3, $4, TRUE, $5::vector)`,
       [userId, fact, category, sourceChatId, embeddingStr]
     );
@@ -377,13 +379,14 @@ export async function searchFacts(
   limit = 30
 ): Promise<(UserFactRow & { distance: number })[]> {
   const userId = await getUserId();
-  const queryEmbedding = await embed(queryText);
-  const vector = toVectorString(queryEmbedding);
+  const result = await embedWithSource(queryText);
+  const col = result.source === "openai" ? "embedding_oai" : "embedding";
+  const vector = toVectorString(result.vector);
 
   return query<UserFactRow & { distance: number }>(
-    `SELECT *, embedding <=> $1::vector AS distance
+    `SELECT *, ${col} <=> $1::vector AS distance
      FROM s2m_user_facts
-     WHERE user_id = $2 AND is_active = TRUE AND embedding IS NOT NULL
+     WHERE user_id = $2 AND is_active = TRUE AND ${col} IS NOT NULL
      ORDER BY distance ASC
      LIMIT $3`,
     [vector, userId, limit]

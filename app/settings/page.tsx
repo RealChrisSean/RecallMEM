@@ -1198,7 +1198,7 @@ function formatUnits(units: number, unitType: string): string {
 
 function UsageSection() {
   const [usage, setUsage] = useState<{ today: UsagePeriod; thisWeek: UsagePeriod; thisMonth: UsagePeriod; allTime: UsagePeriod } | null>(null);
-  const [period, setPeriod] = useState<"today" | "thisWeek" | "thisMonth" | "allTime" | "custom">("thisMonth");
+  const [period, setPeriod] = useState<"today" | "thisWeek" | "thisMonth" | "allTime" | "custom">("today");
   const [customFrom, setCustomFrom] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 30);
     return d.toISOString().slice(0, 10);

@@ -261,18 +261,17 @@ export async function POST(req: NextRequest) {
               generation?.end({ output: assistantContent });
               trace?.update({ output: assistantContent });
 
-              // Log usage
-              const inputChars = llmMessages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
-              const outputChars = assistantContent.length;
+              // Log usage with REAL token counts from the API (not estimates)
+              const actualModel = chunk.model || body.model || undefined;
               let usageProvider = "ollama";
               if (body.providerId) {
                 const prov = await getProvider(body.providerId);
                 if (prov) usageProvider = prov.type === "openai-compatible" && prov.base_url?.includes("x.ai") ? "xai" : prov.type;
               }
-              const tokensIn = Math.round(inputChars / 4);
-              const tokensOut = Math.round(outputChars / 4);
-              logUsage({ provider: usageProvider, service: "chat", model: body.model || undefined, units: tokensIn, unitType: "tokens_in" });
-              logUsage({ provider: usageProvider, service: "chat", model: body.model || undefined, units: tokensOut, unitType: "tokens_out" });
+              const tokensIn = chunk.usage?.inputTokens || Math.round(assistantContent.length / 4);
+              const tokensOut = chunk.usage?.outputTokens || Math.round(assistantContent.length / 4);
+              logUsage({ provider: usageProvider, service: "chat", model: actualModel, units: tokensIn, unitType: "tokens_in" });
+              logUsage({ provider: usageProvider, service: "chat", model: actualModel, units: tokensOut, unitType: "tokens_out" });
 
               // Save chat
               const fullMessages: Message[] = [
@@ -297,7 +296,10 @@ export async function POST(req: NextRequest) {
               );
 
               // NOW close the stream after everything is saved
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                done: true,
+                usage: { inputTokens: tokensIn, outputTokens: tokensOut, model: actualModel },
+              })}\n\n`));
               controller.close();
 
               // Live fact extraction: kick off a background pass against the
@@ -308,10 +310,7 @@ export async function POST(req: NextRequest) {
               // Skip fact extraction in private mode — private conversations
               // should not be saved to memory.
               if (!body.privateMode) {
-                extractFactsLive(finalChatId, {
-                  model: body.model,
-                  providerId: body.providerId,
-                }).catch((err) =>
+                extractFactsLive(finalChatId).catch((err) =>
                   console.error("[chat] live fact extraction error:", err)
                 );
               }
