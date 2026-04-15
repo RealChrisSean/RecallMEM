@@ -52,9 +52,6 @@ const KNOWN_MODELS: Partial<Record<ProviderType, KnownModel[]>> = {
     { label: "Claude Opus 4.6", apiId: "claude-opus-4-6" },
     { label: "Claude Sonnet 4.6", apiId: "claude-sonnet-4-6" },
     { label: "Claude Haiku 4.5", apiId: "claude-haiku-4-5-20251001" },
-    { label: "Claude Opus 4.5", apiId: "claude-opus-4-5" },
-    { label: "Claude Sonnet 4.5", apiId: "claude-sonnet-4-5" },
-    { label: "Claude Haiku 4", apiId: "claude-haiku-4-20250514" },
   ],
   openai: [
     { label: "GPT-5.4", apiId: "gpt-5.4" },

@@ -7,7 +7,11 @@ import { getLangfuse } from "@/lib/langfuse";
 import { searchWeb, formatWebOutcome } from "@/lib/web-search";
 import { getProvider } from "@/lib/providers";
 import { logUsage } from "@/lib/usage";
+import { searchChunksInChat, embedExchange } from "@/lib/chunks";
 import type { Message } from "@/lib/types";
+
+// How many recent exchanges (user+assistant pairs) to keep in full
+const RECENT_EXCHANGES = 5; // 5 exchanges = 10 messages
 
 export const runtime = "nodejs";
 
@@ -145,7 +149,41 @@ export async function POST(req: NextRequest) {
         content: m.content || "[image attached]",
         ...(m.images && m.images.length > 0 ? { images: m.images } : {}),
       }));
+
+    // Sliding window: keep last N exchanges in full, vector search older ones.
+    // This caps token usage regardless of conversation length.
+    const recentMessageCount = RECENT_EXCHANGES * 2; // 5 exchanges = 10 messages
     let chatMessages: ChatMessage[];
+
+    if (baseMessages.length <= recentMessageCount) {
+      // Short conversation — send everything
+      chatMessages = baseMessages;
+    } else {
+      // Long conversation — keep recent, vector search older from DB
+      const recentMessages = baseMessages.slice(-recentMessageCount);
+      const currentUserMessage = recentMessages[recentMessages.length - 1]?.content || "";
+
+      // Vector search older exchanges stored in DB (embedded incrementally)
+      let contextBlock = "";
+      if (chatId) {
+        try {
+          const relevant = await searchChunksInChat(currentUserMessage, chatId, 3);
+          const filtered = relevant.filter((r) => r.distance < 0.6);
+          if (filtered.length > 0) {
+            contextBlock = `[Earlier in this conversation, relevant context:\n${filtered.map((r) => r.chunk_text).join("\n---\n")}\n]`;
+          }
+        } catch (err) {
+          console.error("[chat] in-chat vector search failed:", err);
+        }
+      }
+
+      chatMessages = [
+        ...(contextBlock ? [{ role: "system" as const, content: contextBlock }] : []),
+        ...recentMessages,
+      ];
+    }
+
+    // Add resume marker if needed
     if (shouldMarkResume) {
       const dateStr = now.toISOString().slice(0, 10);
       const gapDays = Math.round(gapMs / (24 * 60 * 60 * 1000));
@@ -154,14 +192,11 @@ export async function POST(req: NextRequest) {
         : `${Math.round(gapMs / (60 * 60 * 1000))} hours later`;
       const marker: ChatMessage = {
         role: "system",
-        content: `[Conversation resumed ${gapText}, on ${dateStr}. Earlier messages above are historical context from a previous session.]`,
+        content: `[Conversation resumed ${gapText}, on ${dateStr}.]`,
       };
-      // Insert the marker right before the latest user message
-      const beforeLast = baseMessages.slice(0, -1);
-      const last = baseMessages[baseMessages.length - 1];
+      const beforeLast = chatMessages.slice(0, -1);
+      const last = chatMessages[chatMessages.length - 1];
       chatMessages = [...beforeLast, marker, last];
-    } else {
-      chatMessages = baseMessages;
     }
 
     const llmMessages: ChatMessage[] = [
@@ -248,6 +283,11 @@ export async function POST(req: NextRequest) {
                 model: body.model || null,
                 providerId: body.providerId || null,
               });
+
+              // Embed this exchange for future in-chat vector search (fire-and-forget)
+              const userMsg = body.messages[body.messages.length - 1]?.content || "";
+              const exchangeIdx = Math.floor(body.messages.length / 2);
+              embedExchange(finalChatId, userMsg, assistantContent, exchangeIdx).catch(() => {});
 
               // Generate title — AWAIT it so it completes before stream closes
               await generateTitleIfMissing(finalChatId, {

@@ -350,6 +350,7 @@ export default function ChatPage() {
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
   const [activeBrain, setActiveBrain] = useState("default");
+  const brainLoadedRef = useRef(false);
   const [brains, setBrains] = useState<{ name: string; emoji: string }[]>([
     { name: "default", emoji: "🧠" },
   ]);
@@ -391,10 +392,13 @@ export default function ChatPage() {
 
     const savedBrain = localStorage.getItem("recallmem.activeBrain");
     if (savedBrain) setActiveBrain(savedBrain);
+    // Mark loaded after a tick so the persist effect skips the initial render
+    setTimeout(() => { brainLoadedRef.current = true; }, 0);
   }, []);
 
-  // Set the brain cookie whenever activeBrain changes
+  // Set the brain cookie whenever activeBrain changes — skip before initial load
   useEffect(() => {
+    if (!brainLoadedRef.current) return;
     document.cookie = `recallmem-brain=${activeBrain};path=/;max-age=31536000`;
     localStorage.setItem("recallmem.activeBrain", activeBrain);
     refreshChatList();
@@ -528,11 +532,14 @@ export default function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load sidebar state
+  const sidebarLoadedRef = useRef(false);
   useEffect(() => {
     const saved = localStorage.getItem(SIDEBAR_STORAGE_KEY);
     if (saved !== null) setSidebarOpen(saved === "true");
+    setTimeout(() => { sidebarLoadedRef.current = true; }, 0);
   }, []);
   useEffect(() => {
+    if (!sidebarLoadedRef.current) return;
     localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarOpen));
   }, [sidebarOpen]);
 
@@ -2835,22 +2842,20 @@ function ModeToggle({
 
 // Known models per provider type. One API key unlocks all models
 // in the group. User picks any model from the dropdown.
-const PROVIDER_MODELS: Record<string, { label: string; apiId: string }[]> = {
+const PROVIDER_MODELS: Record<string, { label: string; apiId: string; pricing?: string }[]> = {
   anthropic: [
-    { label: "Claude Opus 4.6", apiId: "claude-opus-4-6" },
-    { label: "Claude Sonnet 4.6", apiId: "claude-sonnet-4-6" },
-    { label: "Claude Haiku 4.5", apiId: "claude-haiku-4-5-20251001" },
-    { label: "Claude Opus 4.5", apiId: "claude-opus-4-5" },
-    { label: "Claude Sonnet 4.5", apiId: "claude-sonnet-4-5" },
+    { label: "Claude Opus 4.6", apiId: "claude-opus-4-6", pricing: "$15/$75 per 1M tok" },
+    { label: "Claude Sonnet 4.6", apiId: "claude-sonnet-4-6", pricing: "$3/$15 per 1M tok" },
+    { label: "Claude Haiku 4.5", apiId: "claude-haiku-4-5-20251001", pricing: "$0.80/$4 per 1M tok" },
   ],
   openai: [
-    { label: "GPT-5.4", apiId: "gpt-5.4" },
-    { label: "GPT-5.4 Pro", apiId: "gpt-5.4-pro" },
-    { label: "GPT-5.4 Mini", apiId: "gpt-5.4-mini" },
-    { label: "GPT-5.4 Nano", apiId: "gpt-5.4-nano" },
-    { label: "GPT-5", apiId: "gpt-5" },
-    { label: "GPT-5 Mini", apiId: "gpt-5-mini" },
-    { label: "GPT-4.1", apiId: "gpt-4.1" },
+    { label: "GPT-5.4", apiId: "gpt-5.4", pricing: "$2.50/$15 per 1M tok" },
+    { label: "GPT-5.4 Pro", apiId: "gpt-5.4-pro", pricing: "$30/$180 per 1M tok" },
+    { label: "GPT-5.4 Mini", apiId: "gpt-5.4-mini", pricing: "$0.75/$4.50 per 1M tok" },
+    { label: "GPT-5.4 Nano", apiId: "gpt-5.4-nano", pricing: "$0.20/$1.25 per 1M tok" },
+    { label: "GPT-5", apiId: "gpt-5", pricing: "$2.50/$15 per 1M tok" },
+    { label: "GPT-5 Mini", apiId: "gpt-5-mini", pricing: "$0.75/$4.50 per 1M tok" },
+    { label: "GPT-4.1", apiId: "gpt-4.1", pricing: "$2/$8 per 1M tok" },
   ],
 };
 
@@ -2930,7 +2935,7 @@ function ModelPicker({
               <optgroup key={type} label={label}>
                 {knownModels.map((m) => (
                   <option key={m.apiId} value={`provider:${provider.id}::${m.apiId}`}>
-                    {m.label}
+                    {m.label}{m.pricing ? ` — ${m.pricing}` : ""}
                   </option>
                 ))}
               </optgroup>

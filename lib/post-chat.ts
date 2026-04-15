@@ -1,4 +1,4 @@
-import { chat as llmChat, FAST_MODEL } from "@/lib/llm";
+import { chat as llmChat, FAST_MODEL, getCheapestLLM } from "@/lib/llm";
 import { setChatTitle, getChat } from "@/lib/chats";
 import {
   extractFactsWithSupersession,
@@ -35,12 +35,10 @@ export async function runPostChatPipeline(chatId: string): Promise<void> {
     // chat row doesn't have a model recorded yet (older chats).
     if (chatRow.message_count >= 4 && chatRow.transcript.length >= 200) {
       try {
+        const cheapLLM = await getCheapestLLM();
         const { facts, supersedes } = await extractFactsWithSupersession(
           chatRow.transcript,
-          {
-            model: chatRow.model || undefined,
-            providerId: chatRow.provider_id || undefined,
-          }
+          cheapLLM
         );
         const retired = await markFactsSuperseded(supersedes, chatId);
         const inserted = facts.length > 0 ? await storeFacts(facts, chatId) : 0;
@@ -79,7 +77,7 @@ export async function runPostChatPipeline(chatId: string): Promise<void> {
 // small per-turn cost.
 export async function extractFactsLive(
   chatId: string,
-  llmOpts: { model?: string; providerId?: string } = {}
+  _llmOpts: { model?: string; providerId?: string } = {}
 ): Promise<void> {
   // Standalone trace - this runs fire-and-forget after the chat trace has
   // already finished, so we don't try to nest it under the parent.
@@ -108,9 +106,10 @@ export async function extractFactsLive(
       name: "extract-and-supersede",
       input: { transcriptLength: chatRow.transcript.length },
     });
+    const cheapLLM = await getCheapestLLM();
     const { facts, supersedes } = await extractFactsWithSupersession(
       chatRow.transcript,
-      llmOpts
+      cheapLLM
     );
     extractSpan?.end({ output: { facts, supersedes } });
 
@@ -149,15 +148,15 @@ export async function extractFactsLive(
 // back to the local FAST_MODEL via Ollama.
 export async function generateTitleIfMissing(
   chatId: string,
-  opts: { providerId?: string } = {}
+  _opts: { providerId?: string } = {}
 ): Promise<void> {
   try {
     const chatRow = await getChat(chatId);
     if (!chatRow || !chatRow.transcript) return;
-    if (chatRow.title) return; // already has one
-    if (chatRow.message_count < 2) return; // need at least one user msg + one assistant reply
+    if (chatRow.title) return;
+    if (chatRow.message_count < 2) return;
 
-    const title = await generateTitle(chatRow.transcript, opts);
+    const title = await generateTitle(chatRow.transcript);
     if (title) await setChatTitle(chatId, title);
   } catch (err) {
     console.error("[post-chat] early title generation failed:", err);
@@ -166,17 +165,11 @@ export async function generateTitleIfMissing(
 
 async function generateTitle(
   transcript: string,
-  opts: { providerId?: string } = {}
 ): Promise<string | null> {
-  // Just use the first ~1500 chars for the title prompt
   const snippet = transcript.slice(0, 1500);
 
-  // If a providerId is passed, route through the user's selected cloud provider.
-  // Otherwise use the local FAST_MODEL (Gemma 4 E4B via Ollama).
-  // Falls back to a heuristic title if both fail (e.g., Ollama down + no provider).
-  const llmOpts = opts.providerId
-    ? { providerId: opts.providerId }
-    : { model: FAST_MODEL };
+  // Always use the cheapest available model for title generation
+  const llmOpts = await getCheapestLLM();
 
   let response: string;
   try {

@@ -1172,6 +1172,7 @@ function ModelsIcon() {
 interface UsageBreakdown {
   provider: string;
   service: string;
+  model: string | null;
   total_units: number;
   unit_type: string;
   cost_cents: number;
@@ -1289,7 +1290,7 @@ function UsageSection() {
                       <span className={`inline-block w-2 h-2 rounded-full ${
                         row.service === "chat" ? "bg-blue-500" : row.service === "tts" ? "bg-purple-500" : "bg-green-500"
                       }`} />
-                      <span className="font-medium text-zinc-700 dark:text-zinc-300 capitalize">{row.provider}</span>
+                      <span className="font-medium text-zinc-700 dark:text-zinc-300 capitalize">{row.model || row.provider}</span>
                       <span className="text-zinc-400 text-xs">{row.service.toUpperCase()}</span>
                     </div>
                     <div className="text-right">

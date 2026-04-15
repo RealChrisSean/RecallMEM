@@ -1,38 +1,70 @@
 import { query, getBaseUserId } from "@/lib/db";
 
-// Cost per unit in cents. These are approximate and may change.
-const PRICING: Record<string, number> = {
-  // Chat: cost per 1M tokens in cents
-  "anthropic:tokens_in": 300,     // Claude Sonnet ~$3/1M in
-  "anthropic:tokens_out": 1500,   // Claude Sonnet ~$15/1M out
-  "openai:tokens_in": 250,       // GPT-4o ~$2.50/1M in
-  "openai:tokens_out": 1000,     // GPT-4o ~$10/1M out
-  "xai:tokens_in": 200,          // Grok ~$2/1M in
-  "xai:tokens_out": 1000,        // Grok ~$10/1M out
-  "ollama:tokens_in": 0,         // Free (local)
-  "ollama:tokens_out": 0,
-  // TTS: cost per 1M characters in cents
-  "xai:tts_chars": 420,          // $4.20/1M chars
-  "openai:tts_chars": 3000,      // $30/1M chars
-  "deepgram:tts_chars": 3000,    // $30/1M chars
-  // STT: cost per minute in cents
-  "deepgram:stt_ms": 0.043,     // $0.0043/min = 0.043 cents/min (stored as ms)
-  "whisper:stt_ms": 0,           // Free (local)
+// Model-specific pricing per 1M tokens (in cents).
+// Falls back to provider-level defaults if model not found.
+const MODEL_PRICING: Record<string, { in: number; out: number }> = {
+  // Anthropic
+  "claude-opus-4-6":             { in: 1500, out: 7500 },  // $15/$75
+  "claude-opus-4-5":             { in: 1500, out: 7500 },
+  "claude-sonnet-4-6":           { in: 300,  out: 1500 },  // $3/$15
+  "claude-sonnet-4-5":           { in: 300,  out: 1500 },
+  "claude-haiku-4-5-20251001":   { in: 80,   out: 400 },   // $0.80/$4
+  // OpenAI
+  "gpt-5.4":                     { in: 250,  out: 1500 },  // $2.50/$15
+  "gpt-5.4-pro":                 { in: 3000, out: 18000 }, // $30/$180
+  "gpt-5.4-mini":                { in: 75,   out: 450 },   // $0.75/$4.50
+  "gpt-5.4-nano":                { in: 20,   out: 125 },   // $0.20/$1.25
+  "gpt-5":                       { in: 250,  out: 1500 },
+  "gpt-5-mini":                  { in: 75,   out: 450 },
+  "gpt-4.1":                     { in: 200,  out: 800 },   // $2/$8
+  "gpt-4.1-mini":                { in: 40,   out: 160 },   // $0.40/$1.60
+  "gpt-4.1-nano":                { in: 10,   out: 40 },    // $0.10/$0.40
+  "o4-mini":                     { in: 400,  out: 1600 },  // $4/$16
+  // xAI
+  "grok-3":                      { in: 300,  out: 1500 },  // $3/$15
+  "grok-3-mini":                 { in: 25,   out: 50 },    // $0.25/$0.50
+  "grok-3-fast":                 { in: 20,   out: 50 },    // $0.20/$0.50
+  "grok-4.20-0309-reasoning":    { in: 300,  out: 1500 },
 };
 
-function estimateCostCents(provider: string, unitType: string, units: number): number {
-  const key = `${provider}:${unitType}`;
-  const ratePerMillion = PRICING[key];
-  if (ratePerMillion === undefined || ratePerMillion === 0) return 0;
+// Provider-level defaults (fallback if model not in the table above)
+const PROVIDER_DEFAULTS: Record<string, { in: number; out: number }> = {
+  anthropic: { in: 300, out: 1500 },   // Sonnet pricing as default
+  openai:    { in: 250, out: 1500 },
+  xai:       { in: 300, out: 1500 },
+  ollama:    { in: 0,   out: 0 },
+};
 
-  if (unitType === "stt_ms") {
-    // Convert ms to minutes, then multiply by cost per minute
-    const minutes = units / 60000;
-    return minutes * ratePerMillion;
+// Non-chat pricing
+const OTHER_PRICING: Record<string, number> = {
+  "xai:tts_chars":      420,     // $4.20/1M chars
+  "openai:tts_chars":   3000,    // $30/1M chars
+  "deepgram:tts_chars": 3000,    // $30/1M chars
+  "deepgram:stt_ms":    0.043,   // $0.0043/min
+  "whisper:stt_ms":     0,
+};
+
+function estimateCostCents(provider: string, unitType: string, units: number, model?: string | null): number {
+  if (units <= 0) return 0;
+
+  // Token pricing — look up by model first, then provider default
+  if (unitType === "tokens_in" || unitType === "tokens_out") {
+    const modelPricing = model ? MODEL_PRICING[model] : null;
+    const pricing = modelPricing || PROVIDER_DEFAULTS[provider] || { in: 0, out: 0 };
+    const rate = unitType === "tokens_in" ? pricing.in : pricing.out;
+    return (units / 1_000_000) * rate;
   }
 
-  // tokens or characters: rate is per 1M units
-  return (units / 1_000_000) * ratePerMillion;
+  // STT pricing (ms -> minutes)
+  if (unitType === "stt_ms") {
+    const rate = OTHER_PRICING[`${provider}:stt_ms`] || 0;
+    return (units / 60000) * rate;
+  }
+
+  // TTS / character pricing
+  const key = `${provider}:${unitType === "characters" ? "tts_chars" : unitType}`;
+  const rate = OTHER_PRICING[key] || 0;
+  return (units / 1_000_000) * rate;
 }
 
 export async function logUsage(opts: {
@@ -45,7 +77,7 @@ export async function logUsage(opts: {
   if (opts.units <= 0) return;
 
   const userId = await getBaseUserId();
-  const costCents = estimateCostCents(opts.provider, opts.unitType === "characters" ? `${opts.service}_chars` : opts.unitType === "ms" ? "stt_ms" : opts.unitType, opts.units);
+  const costCents = estimateCostCents(opts.provider, opts.unitType, opts.units, opts.model);
 
   await query(
     `INSERT INTO s2m_usage (user_id, provider, service, model, units, unit_type, cost_cents)
@@ -67,6 +99,7 @@ export interface UsageSummary {
 interface UsageBreakdown {
   provider: string;
   service: string;
+  model: string | null;
   total_units: number;
   unit_type: string;
   cost_cents: number;
@@ -76,12 +109,14 @@ export async function getUsageSummary(): Promise<UsageSummary> {
   const userId = await getBaseUserId();
 
   const breakdownQuery = `
-    SELECT provider, service, unit_type,
+    SELECT provider, service, model,
+           CASE WHEN unit_type IN ('tokens_in','tokens_out') THEN 'tokens' ELSE unit_type END as unit_type,
            SUM(units)::int as total_units,
            SUM(cost_cents)::numeric as cost_cents
     FROM s2m_usage
     WHERE user_id = $1 AND created_at >= $2
-    GROUP BY provider, service, unit_type
+    GROUP BY provider, service, model,
+             CASE WHEN unit_type IN ('tokens_in','tokens_out') THEN 'tokens' ELSE unit_type END
     ORDER BY cost_cents DESC
   `;
 
@@ -113,12 +148,14 @@ export async function getUsageSummary(): Promise<UsageSummary> {
 export async function getUsageForRange(from: Date, to: Date): Promise<{ cost_cents: number; breakdown: UsageBreakdown[] }> {
   const userId = await getBaseUserId();
   const rows = await query<UsageBreakdown>(
-    `SELECT provider, service, unit_type,
+    `SELECT provider, service, model,
+            CASE WHEN unit_type IN ('tokens_in','tokens_out') THEN 'tokens' ELSE unit_type END as unit_type,
             SUM(units)::int as total_units,
             SUM(cost_cents)::numeric as cost_cents
      FROM s2m_usage
      WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
-     GROUP BY provider, service, unit_type
+     GROUP BY provider, service, model,
+              CASE WHEN unit_type IN ('tokens_in','tokens_out') THEN 'tokens' ELSE unit_type END
      ORDER BY cost_cents DESC`,
     [userId, from, to]
   );

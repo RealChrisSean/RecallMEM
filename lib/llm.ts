@@ -39,6 +39,52 @@ export const MODEL_CONFIGS: Record<ModelMode, ModelConfig> = {
 export const FAST_MODEL =
   process.env.OLLAMA_FAST_MODEL || "gemma4:e4b";
 
+/**
+ * Find the cheapest available LLM for background tasks (fact extraction, title gen).
+ * Priority: Haiku > GPT-4.1 Nano > Grok Mini > local Gemma.
+ * Returns { model, providerId } for use with llmChat().
+ */
+import { listProviders } from "@/lib/providers";
+
+let _cheapestCache: { model: string; providerId?: string } | null = null;
+let _cheapestCacheTime = 0;
+
+export async function getCheapestLLM(): Promise<{ model: string; providerId?: string }> {
+  // Cache for 60 seconds to avoid querying providers on every message
+  if (_cheapestCache && Date.now() - _cheapestCacheTime < 60000) return _cheapestCache;
+
+  const providers = await listProviders();
+
+  // 1. Haiku via Anthropic ($1/$5)
+  const anthropic = providers.find((p) => p.type === "anthropic" && p.api_key);
+  if (anthropic) {
+    _cheapestCache = { model: "claude-haiku-4-5-20251001", providerId: anthropic.id };
+    _cheapestCacheTime = Date.now();
+    return _cheapestCache;
+  }
+
+  // 2. GPT-4.1 Nano via OpenAI ($0.10/$0.40)
+  const openai = providers.find((p) => p.type === "openai" && p.api_key);
+  if (openai) {
+    _cheapestCache = { model: "gpt-4.1-nano", providerId: openai.id };
+    _cheapestCacheTime = Date.now();
+    return _cheapestCache;
+  }
+
+  // 3. Grok Mini via xAI ($0.25/$0.50)
+  const xai = providers.find((p) => p.type === "openai-compatible" && p.api_key && p.base_url?.includes("x.ai"));
+  if (xai) {
+    _cheapestCache = { model: "grok-3-mini", providerId: xai.id };
+    _cheapestCacheTime = Date.now();
+    return _cheapestCache;
+  }
+
+  // 4. Local Gemma (free)
+  _cheapestCache = { model: FAST_MODEL };
+  _cheapestCacheTime = Date.now();
+  return _cheapestCache;
+}
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;

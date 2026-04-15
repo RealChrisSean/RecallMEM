@@ -48,6 +48,46 @@ export async function embedAndStoreChunks(
   return chunks.length;
 }
 
+// Embed a single exchange (user + assistant) and store it. Called after each
+// response so older messages are searchable without re-embedding everything.
+export async function embedExchange(
+  chatId: string,
+  userMessage: string,
+  assistantMessage: string,
+  exchangeIndex: number
+): Promise<void> {
+  const userId = await getUserId();
+  const text = `${userMessage}\n${assistantMessage}`.trim();
+  if (!text || text.length < 20) return;
+
+  const [embedding] = await embedBatch([text.slice(0, 1000)]);
+  await query(
+    `INSERT INTO s2m_transcript_chunks (user_id, chat_id, chunk_text, chunk_index, embedding)
+     VALUES ($1, $2, $3, $4, $5::vector)`,
+    [userId, chatId, text, exchangeIndex, toVectorString(embedding)]
+  );
+}
+
+// Vector search within a specific chat (for sliding window context retrieval)
+export async function searchChunksInChat(
+  queryText: string,
+  chatId: string,
+  limit = 3
+): Promise<{ chunk_text: string; distance: number }[]> {
+  const userId = await getUserId();
+  const queryEmbedding = await embed(queryText);
+  const vector = toVectorString(queryEmbedding);
+
+  return query(
+    `SELECT chunk_text, embedding <=> $1::vector AS distance
+     FROM s2m_transcript_chunks
+     WHERE user_id = $2 AND chat_id = $3
+     ORDER BY distance ASC
+     LIMIT $4`,
+    [vector, userId, chatId, limit]
+  );
+}
+
 // Vector search over past transcript chunks for relevant context. Joins
 // against s2m_chats so callers also get the chat's created_at — used by
 // the prompt builder to stamp recalled chunks with their date so the
