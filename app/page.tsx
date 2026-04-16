@@ -78,15 +78,18 @@ export default function ChatPage() {
   const [showBrainHint, setShowBrainHint] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [showVoiceAgent, setShowVoiceAgent] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
-  const recordingLoopRef = useRef<boolean>(false);
-  const silenceCountRef = useRef(0);
+  const sttWsRef = useRef<WebSocket | null>(null);
+  const sttProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const sttContextRef = useRef<AudioContext | null>(null);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTranscriptTimeRef = useRef(Date.now());
   const [idlePrompt, setIdlePrompt] = useState(false);
   const [idleCountdown, setIdleCountdown] = useState(30);
   const idleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isRecordingRef = useRef(false);
 
-  const SILENCE_CHUNKS_BEFORE_PROMPT = 20; // ~60s of silence (20 x 3s chunks)
+  const IDLE_SILENCE_MS = 60000;
   const IDLE_COUNTDOWN_SECONDS = 30;
 
   function startIdleCountdown() {
@@ -95,7 +98,6 @@ export default function ChatPage() {
     idleTimerRef.current = setInterval(() => {
       setIdleCountdown((prev) => {
         if (prev <= 1) {
-          // Time's up -- stop recording
           stopRecording();
           return 0;
         }
@@ -106,53 +108,108 @@ export default function ChatPage() {
 
   function dismissIdlePrompt() {
     setIdlePrompt(false);
-    silenceCountRef.current = 0;
     if (idleTimerRef.current) {
       clearInterval(idleTimerRef.current);
       idleTimerRef.current = null;
     }
   }
 
+  function resetSilenceTimer() {
+    lastTranscriptTimeRef.current = Date.now();
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    silenceTimerRef.current = setTimeout(() => {
+      if (isRecordingRef.current) startIdleCountdown();
+    }, IDLE_SILENCE_MS);
+    if (idlePrompt) dismissIdlePrompt();
+  }
+
   async function startRecording() {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const configRes = await fetch("/api/stt/config");
+      const config = await configRes.json() as { provider: string; key?: string };
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 },
+      });
       recordingStreamRef.current = stream;
       setIsRecording(true);
-      recordingLoopRef.current = true;
-      silenceCountRef.current = 0;
+      isRecordingRef.current = true;
+      resetSilenceTimer();
 
-      while (recordingLoopRef.current) {
-        const text = await recordChunkAndTranscribe(stream);
-        if (text && recordingLoopRef.current) {
-          setInput((prev) => (prev ? prev + " " + text : text));
-          silenceCountRef.current = 0;
-          // If idle prompt is showing and user spoke, dismiss it
-          if (idlePrompt) dismissIdlePrompt();
-        } else if (recordingLoopRef.current && !idlePrompt) {
-          silenceCountRef.current++;
-          if (silenceCountRef.current >= SILENCE_CHUNKS_BEFORE_PROMPT) {
-            startIdleCountdown();
+      if (config.provider === "deepgram" && config.key) {
+        // Deepgram streaming WebSocket -- continuous audio, no gaps
+        const ws = new WebSocket(
+          "wss://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&interim_results=false&endpointing=300",
+          ["token", config.key]
+        );
+        sttWsRef.current = ws;
+
+        ws.onopen = () => {
+          const audioCtx = new AudioContext({ sampleRate: 16000 });
+          sttContextRef.current = audioCtx;
+          const source = audioCtx.createMediaStreamSource(stream);
+          const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+          sttProcessorRef.current = processor;
+
+          processor.onaudioprocess = (e) => {
+            if (ws.readyState !== WebSocket.OPEN) return;
+            const float32 = e.inputBuffer.getChannelData(0);
+            const int16 = new Int16Array(float32.length);
+            for (let i = 0; i < float32.length; i++) {
+              const s = Math.max(-1, Math.min(1, float32[i]));
+              int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            ws.send(int16.buffer);
+          };
+
+          source.connect(processor);
+          processor.connect(audioCtx.destination);
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data as string) as {
+              is_final?: boolean;
+              channel?: { alternatives?: { transcript?: string }[] };
+            };
+            if (data.is_final) {
+              const transcript = data.channel?.alternatives?.[0]?.transcript?.trim();
+              if (transcript && transcript.length > 0) {
+                setInput((prev) => (prev ? prev + " " + transcript : transcript));
+                resetSilenceTimer();
+              }
+            }
+          } catch { /* skip */ }
+        };
+
+        ws.onerror = () => console.error("[stt] Deepgram WebSocket error");
+        ws.onclose = () => { sttWsRef.current = null; };
+      } else {
+        // Fallback: chunked recording to local Whisper
+        const loop = async () => {
+          while (isRecordingRef.current) {
+            const text = await recordChunkWhisper(stream);
+            if (text) {
+              setInput((prev) => (prev ? prev + " " + text : text));
+              resetSilenceTimer();
+            }
           }
-        }
+        };
+        loop();
       }
     } catch (err) {
       console.error("[voice] mic access error:", err);
-    } finally {
       setIsRecording(false);
-      dismissIdlePrompt();
+      isRecordingRef.current = false;
     }
   }
 
-  function recordChunkAndTranscribe(stream: MediaStream): Promise<string> {
+  function recordChunkWhisper(stream: MediaStream): Promise<string> {
     return new Promise((resolve) => {
-      if (!recordingLoopRef.current) { resolve(""); return; }
-
+      if (!isRecordingRef.current) { resolve(""); return; }
       const recorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
-      mediaRecorderRef.current = recorder;
       const chunks: Blob[] = [];
-
       recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-
       recorder.onstop = async () => {
         if (!chunks.length) { resolve(""); return; }
         const blob = new Blob(chunks, { type: "audio/webm" });
@@ -162,33 +219,30 @@ export default function ChatPage() {
           const res = await fetch("/api/transcribe", { method: "POST", body: form });
           const data = await res.json() as { text?: string };
           const text = (data.text || "").trim();
-          if (text && !text.startsWith("[") && !text.includes("BLANK") && text.length > 1) {
-            resolve(text);
-          } else {
-            resolve("");
-          }
-        } catch {
-          resolve("");
-        }
+          resolve(text && !text.startsWith("[") && !text.includes("BLANK") && text.length > 1 ? text : "");
+        } catch { resolve(""); }
       };
-
       recorder.start();
-      setTimeout(() => {
-        if (recorder.state === "recording") recorder.stop();
-      }, 3000);
+      setTimeout(() => { if (recorder.state === "recording") recorder.stop(); }, 3000);
     });
   }
 
   function stopRecording() {
-    recordingLoopRef.current = false;
-    if (mediaRecorderRef.current?.state === "recording") {
-      mediaRecorderRef.current.stop();
+    isRecordingRef.current = false;
+    if (sttWsRef.current) {
+      if (sttWsRef.current.readyState === WebSocket.OPEN) {
+        sttWsRef.current.send(JSON.stringify({ type: "CloseStream" }));
+      }
+      sttWsRef.current.close();
+      sttWsRef.current = null;
     }
+    if (sttProcessorRef.current) { sttProcessorRef.current.disconnect(); sttProcessorRef.current = null; }
+    if (sttContextRef.current) { sttContextRef.current.close(); sttContextRef.current = null; }
     if (recordingStreamRef.current) {
       recordingStreamRef.current.getTracks().forEach((t) => t.stop());
       recordingStreamRef.current = null;
     }
-    mediaRecorderRef.current = null;
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
     setIsRecording(false);
     dismissIdlePrompt();
   }
@@ -1000,19 +1054,18 @@ export default function ChatPage() {
         // Resize to max 2000px on longest side to avoid Anthropic's limit
         const img = new Image();
         img.onload = () => {
-          const MAX = 2000;
-          if (img.width <= MAX && img.height <= MAX) {
-            resolve(dataUrl);
-            return;
-          }
-          const scale = MAX / Math.max(img.width, img.height);
+          // Compress to 768px max, JPEG 50% — LLMs read this fine,
+          // cuts image tokens by ~10x vs full resolution PNG
+          const MAX = 768;
+          const needsResize = img.width > MAX || img.height > MAX;
+          const scale = needsResize ? MAX / Math.max(img.width, img.height) : 1;
           const canvas = document.createElement("canvas");
           canvas.width = Math.round(img.width * scale);
           canvas.height = Math.round(img.height * scale);
           const ctx = canvas.getContext("2d");
           if (!ctx) { resolve(dataUrl); return; }
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          resolve(canvas.toDataURL("image/jpeg", 0.85));
+          resolve(canvas.toDataURL("image/jpeg", 0.5));
         };
         img.onerror = () => resolve(dataUrl);
         img.src = dataUrl;
@@ -2903,7 +2956,8 @@ function ModeToggle({
 // in the group. User picks any model from the dropdown.
 const PROVIDER_MODELS: Record<string, { label: string; apiId: string; pricing?: string }[]> = {
   anthropic: [
-    { label: "Claude Opus 4.6", apiId: "claude-opus-4-6", pricing: "$15/$75 per 1M tok" },
+    { label: "Claude Opus 4.7", apiId: "claude-opus-4-7", pricing: "$5/$25 per 1M tok" },
+    { label: "Claude Opus 4.6", apiId: "claude-opus-4-6", pricing: "$5/$25 per 1M tok" },
     { label: "Claude Sonnet 4.6", apiId: "claude-sonnet-4-6", pricing: "$3/$15 per 1M tok" },
     { label: "Claude Haiku 4.5", apiId: "claude-haiku-4-5-20251001", pricing: "$0.80/$4 per 1M tok" },
   ],

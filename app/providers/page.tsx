@@ -49,6 +49,7 @@ interface KnownModel {
 
 const KNOWN_MODELS: Partial<Record<ProviderType, KnownModel[]>> = {
   anthropic: [
+    { label: "Claude Opus 4.7", apiId: "claude-opus-4-7" },
     { label: "Claude Opus 4.6", apiId: "claude-opus-4-6" },
     { label: "Claude Sonnet 4.6", apiId: "claude-sonnet-4-6" },
     { label: "Claude Haiku 4.5", apiId: "claude-haiku-4-5-20251001" },
@@ -227,6 +228,10 @@ export default function ProvidersPage() {
       resetForm();
       setShowForm(false);
       load();
+      // If an OpenAI provider was added, trigger embedding backfill (fire-and-forget)
+      if (type === "openai") {
+        fetch("/api/embeddings/backfill", { method: "POST" }).catch(() => {});
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {

@@ -79,8 +79,6 @@ export async function extractFactsLive(
   chatId: string,
   _llmOpts: { model?: string; providerId?: string } = {}
 ): Promise<void> {
-  // Standalone trace - this runs fire-and-forget after the chat trace has
-  // already finished, so we don't try to nest it under the parent.
   const langfuse = getLangfuse();
   const trace = langfuse?.trace({
     name: "live-fact-extraction",
@@ -92,23 +90,42 @@ export async function extractFactsLive(
       trace?.update({ output: { skipped: "no transcript" } });
       return;
     }
-    // Same quality bar as the batch pipeline so we don't extract from a
-    // single greeting.
     if (chatRow.message_count < 2 || chatRow.transcript.length < 100) {
       trace?.update({ output: { skipped: "below quality bar" } });
       return;
     }
 
-    // Combined extract + supersede in one LLM call. Retires stale facts
-    // ("works at Acme" once "left Acme for a new job" is said) so the
-    // active set always reflects current truth.
+    // Only extract from the LATEST exchange, not the full transcript.
+    // The active facts list handles contradiction detection.
+    // This cuts Haiku input from ~50K tokens to ~2K per call.
+    let latestExchange = chatRow.transcript;
+    try {
+      const parsed = JSON.parse(chatRow.transcript);
+      if (Array.isArray(parsed) && parsed.length >= 2) {
+        const lastTwo = parsed.slice(-2);
+        latestExchange = lastTwo.map((m: { role: string; content: string }) => `${m.role}: ${m.content}`).join("\n\n");
+      }
+    } catch {
+      // Plain text transcript -- grab last user+assistant block
+      const blocks = chatRow.transcript.split(/\n\n+/);
+      const lastBlocks: string[] = [];
+      let found = 0;
+      for (let i = blocks.length - 1; i >= 0 && found < 2; i--) {
+        if (blocks[i].startsWith("user:") || blocks[i].startsWith("assistant:")) {
+          lastBlocks.unshift(blocks[i]);
+          found++;
+        }
+      }
+      if (lastBlocks.length > 0) latestExchange = lastBlocks.join("\n\n");
+    }
+
     const extractSpan = trace?.span({
       name: "extract-and-supersede",
-      input: { transcriptLength: chatRow.transcript.length },
+      input: { exchangeLength: latestExchange.length },
     });
     const cheapLLM = await getCheapestLLM();
     const { facts, supersedes } = await extractFactsWithSupersession(
-      chatRow.transcript,
+      latestExchange,
       cheapLLM
     );
     extractSpan?.end({ output: { facts, supersedes } });

@@ -8,6 +8,7 @@ import { searchWeb, formatWebOutcome } from "@/lib/web-search";
 import { getProvider } from "@/lib/providers";
 import { logUsage } from "@/lib/usage";
 import { searchChunksInChat, embedExchange } from "@/lib/chunks";
+import { getEmbeddingSource } from "@/lib/embeddings";
 import type { Message } from "@/lib/types";
 
 // How many recent exchanges (user+assistant pairs) to keep in full
@@ -283,10 +284,15 @@ export async function POST(req: NextRequest) {
                 providerId: body.providerId || null,
               });
 
-              // Embed this exchange for future in-chat vector search (fire-and-forget)
-              const userMsg = body.messages[body.messages.length - 1]?.content || "";
-              const exchangeIdx = Math.floor(body.messages.length / 2);
-              embedExchange(finalChatId, userMsg, assistantContent, exchangeIdx).catch(() => {});
+              // Embed this exchange for in-chat vector search.
+              // Only runs with OpenAI embeddings (fast, no GPU conflict).
+              // Ollama users get embeddings at finalize instead.
+              const embSource = await getEmbeddingSource();
+              if (embSource === "openai") {
+                const userMsg = body.messages[body.messages.length - 1]?.content || "";
+                const exchangeIdx = Math.floor(body.messages.length / 2);
+                embedExchange(finalChatId, userMsg, assistantContent, exchangeIdx).catch(() => {});
+              }
 
               // Generate title — AWAIT it so it completes before stream closes
               await generateTitleIfMissing(finalChatId, {

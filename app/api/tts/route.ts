@@ -22,18 +22,19 @@ const VOICES: Record<string, string[]> = {
  * GET /api/tts — returns available TTS providers + current settings
  */
 export async function GET() {
-  const providers = await listProviders();
+  const [providers, xaiVoiceKey, deepgramKey, ttsProvider, ttsVoice, sttProvider, voiceChatMode] = await Promise.all([
+    listProviders(),
+    getSetting("xai_voice_api_key"),
+    getSetting("deepgram_api_key"),
+    getSetting("tts_provider"),
+    getSetting("tts_voice"),
+    getSetting("stt_provider"),
+    getSetting("voice_chat_mode"),
+  ]);
   const hasOpenAI = providers.some((p) => p.type === "openai" && p.api_key);
   const hasXAI = providers.some((p) => p.type === "openai-compatible" && p.api_key && p.base_url?.includes("x.ai"));
-  const xaiVoiceKey = await getSetting("xai_voice_api_key");
   const hasXAIVoice = hasXAI || !!xaiVoiceKey;
-  const deepgramKey = await getSetting("deepgram_api_key");
   const hasDeepgram = !!deepgramKey;
-
-  const ttsProvider = await getSetting("tts_provider");
-  const ttsVoice = await getSetting("tts_voice");
-  const sttProvider = await getSetting("stt_provider");
-  const voiceChatMode = await getSetting("voice_chat_mode");
 
   return Response.json({
     available: { xai: hasXAIVoice, openai: hasOpenAI, deepgram: hasDeepgram, browser: true },
@@ -54,16 +55,18 @@ export async function POST(req: NextRequest) {
   const { text } = (await req.json()) as { text: string };
   if (!text) return Response.json({ error: "text required" }, { status: 400 });
 
-  const providers = await listProviders();
-  const ttsProvider = await getSetting("tts_provider");
-  const ttsVoice = await getSetting("tts_voice");
+  // Parallel DB lookups -- cuts ~40ms off cold start
+  const [providers, ttsProvider, ttsVoice, deepgramKey, xaiVoiceKeySetting] = await Promise.all([
+    listProviders(),
+    getSetting("tts_provider"),
+    getSetting("tts_voice"),
+    getSetting("deepgram_api_key"),
+    getSetting("xai_voice_api_key"),
+  ]);
 
-  // Find available providers
   const xai = providers.find((p) => p.type === "openai-compatible" && p.api_key && p.base_url?.includes("x.ai"));
   const openai = providers.find((p) => p.type === "openai" && p.api_key);
-  const deepgramKey = await getSetting("deepgram_api_key");
-  // xAI Voice endpoint needs a separate API key with Voice permission
-  const xaiVoiceKey = await getSetting("xai_voice_api_key") || xai?.api_key;
+  const xaiVoiceKey = xaiVoiceKeySetting || xai?.api_key;
 
   // Determine which provider to use (setting > auto-detect by cost)
   const provider = ttsProvider || (hasKey(xai) ? "xai" : hasKey(openai) ? "openai" : deepgramKey ? "deepgram" : "browser");

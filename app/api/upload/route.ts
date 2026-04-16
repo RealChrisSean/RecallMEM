@@ -76,13 +76,13 @@ export async function POST(req: NextRequest) {
 
         // Render at 150 DPI (good balance of quality vs size). Max 20 pages.
         execSync(
-          `pdftoppm -png -r 150 -l 20 "${pdfPath}" "${outDir}/page"`,
+          `pdftoppm -jpeg -jpegopt quality=50 -r 72 -l 20 "${pdfPath}" "${outDir}/page"`,
           { timeout: 30000 }
         );
 
         // Read rendered page images and convert to base64
         const files = readdirSync(outDir)
-          .filter((f) => f.endsWith(".png"))
+          .filter((f) => f.endsWith(".jpg") || f.endsWith(".png"))
           .sort();
 
         for (const f of files) {
