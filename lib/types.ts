@@ -54,7 +54,22 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   images?: string[]; // base64-encoded image data (for vision-capable models)
+  generatedImage?: GeneratedImage;
   usage?: { inputTokens: number; outputTokens: number; model: string };
+}
+
+export interface GeneratedImage {
+  id: string;
+  prompt: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  generationType?: "image" | "image_edit";
+  url?: string;
+  aspectRatio?: string | null;
+  style?: string | null;
+  outputFormat?: string | null;
+  webSearch?: boolean;
+  failureReason?: string | null;
+  failureCode?: string | null;
 }
 
 export interface AttachedFile {

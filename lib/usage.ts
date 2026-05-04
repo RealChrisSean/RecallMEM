@@ -11,6 +11,7 @@ const MODEL_PRICING: Record<string, { in: number; out: number }> = {
   "claude-sonnet-4-5":           { in: 300,  out: 1500 },
   "claude-haiku-4-5-20251001":   { in: 80,   out: 400 },   // $0.80/$4
   // OpenAI
+  "gpt-5.5":                     { in: 500,  out: 3000 },  // $5/$30
   "gpt-5.4":                     { in: 250,  out: 1500 },  // $2.50/$15
   "gpt-5.4-pro":                 { in: 3000, out: 18000 }, // $30/$180
   "gpt-5.4-mini":                { in: 75,   out: 450 },   // $0.75/$4.50

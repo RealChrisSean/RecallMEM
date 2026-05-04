@@ -34,7 +34,7 @@ const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
 const PRESET_HINTS: Record<ProviderType, string> = {
   ollama: "e.g. gemma4:26b, llama3:70b",
   anthropic: "e.g. claude-opus-4-6, claude-sonnet-4-6",
-  openai: "e.g. gpt-5.4, gpt-5.4-mini",
+  openai: "e.g. gpt-5.5, gpt-5.4-mini",
   "openai-compatible":
     "e.g. llama-3.3-70b-versatile, mixtral-8x22b, anthropic/claude-opus-4-6",
 };
@@ -55,6 +55,7 @@ const KNOWN_MODELS: Partial<Record<ProviderType, KnownModel[]>> = {
     { label: "Claude Haiku 4.5", apiId: "claude-haiku-4-5-20251001" },
   ],
   openai: [
+    { label: "GPT-5.5", apiId: "gpt-5.5" },
     { label: "GPT-5.4", apiId: "gpt-5.4" },
     { label: "GPT-5.4 Pro", apiId: "gpt-5.4-pro" },
     { label: "GPT-5.4 Mini", apiId: "gpt-5.4-mini" },
