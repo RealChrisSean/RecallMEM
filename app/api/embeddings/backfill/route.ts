@@ -1,5 +1,5 @@
 import { query, getBaseUserId } from "@/lib/db";
-import { embedBatchWithSource } from "@/lib/embeddings";
+import { embedBatchWithSource, embeddingColumnForSource } from "@/lib/embeddings";
 
 export const runtime = "nodejs";
 
@@ -11,15 +11,16 @@ export const runtime = "nodejs";
  * to OpenAI 256-dim so vector search uses the same model everywhere.
  */
 export async function POST() {
-  const userId = await getBaseUserId();
+  const baseUserId = await getBaseUserId();
 
   let factsUpdated = 0;
   let chunksUpdated = 0;
 
   // --- Backfill facts ---
   const facts = await query<{ id: string; fact_text: string }>(
-    `SELECT id, fact_text FROM s2m_user_facts WHERE user_id = $1 AND is_active = TRUE`,
-    [userId]
+    `SELECT id, fact_text FROM s2m_user_facts
+     WHERE (user_id = $1 OR user_id LIKE $1 || '::%') AND is_active = TRUE`,
+    [baseUserId]
   );
 
   if (facts.length > 0) {
@@ -28,7 +29,7 @@ export async function POST() {
       const batch = facts.slice(i, i + 100);
       const texts = batch.map((f) => f.fact_text);
       const results = await embedBatchWithSource(texts);
-      const col = results[0].source === "openai" ? "embedding_oai" : "embedding";
+      const col = embeddingColumnForSource(results[0].source);
 
       for (let j = 0; j < batch.length; j++) {
         const vecStr = `[${results[j].vector.join(",")}]`;
@@ -43,8 +44,9 @@ export async function POST() {
 
   // --- Backfill transcript chunks ---
   const chunks = await query<{ id: string; chunk_text: string }>(
-    `SELECT id, chunk_text FROM s2m_transcript_chunks WHERE user_id = $1`,
-    [userId]
+    `SELECT id, chunk_text FROM s2m_transcript_chunks
+     WHERE user_id = $1 OR user_id LIKE $1 || '::%'`,
+    [baseUserId]
   );
 
   if (chunks.length > 0) {
@@ -52,7 +54,7 @@ export async function POST() {
       const batch = chunks.slice(i, i + 100);
       const texts = batch.map((c) => c.chunk_text.slice(0, 1000));
       const results = await embedBatchWithSource(texts);
-      const col = results[0].source === "openai" ? "embedding_oai" : "embedding";
+      const col = embeddingColumnForSource(results[0].source);
 
       for (let j = 0; j < batch.length; j++) {
         const vecStr = `[${results[j].vector.join(",")}]`;

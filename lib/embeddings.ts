@@ -25,6 +25,10 @@ export type EmbedResult = {
   source: "openai" | "ollama";
 };
 
+export function embeddingColumnForSource(source: EmbedResult["source"]): "embedding_oai" | "embedding" {
+  return source === "openai" ? "embedding_oai" : "embedding";
+}
+
 export async function embed(text: string): Promise<number[]> {
   const result = await embedWithSource(text);
   return result.vector;

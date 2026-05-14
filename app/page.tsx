@@ -80,7 +80,7 @@ export default function ChatPage() {
   const [composerMode, setComposerMode] = useState<ComposerMode>("chat");
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [lumaConfigured, setLumaConfigured] = useState(false);
-  const [lumaAspectRatio, setLumaAspectRatio] = useState<LumaAspectRatioOption>("1:1");
+  const [lumaAspectRatio, setLumaAspectRatio] = useState<LumaAspectRatioOption>("16:9");
   const [lumaStyle, setLumaStyle] = useState<LumaStyleOption>("auto");
   const [lumaOutputFormat, setLumaOutputFormat] = useState<LumaOutputFormatOption>("");
   const [lumaWebSearch, setLumaWebSearch] = useState(false);
@@ -611,6 +611,7 @@ export default function ChatPage() {
   const isBusy = isStreaming || isGeneratingImage;
   const composerDisabled =
     composerMode === "image" ? !lumaConfigured : noChatBackend;
+  const latestGeneratedImage = getLatestCompletedGeneratedImage(messages);
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const chatIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1244,6 +1245,14 @@ export default function ChatPage() {
     return { media_type: "image/jpeg", data: imageAttachmentToBase64(file) };
   }
 
+  function getLatestCompletedGeneratedImage(sourceMessages: Message[]) {
+    for (let index = sourceMessages.length - 1; index >= 0; index--) {
+      const image = sourceMessages[index].generatedImage;
+      if (image?.status === "completed" && image.url) return image;
+    }
+    return null;
+  }
+
   function updateGeneratedImageMessage(image: NonNullable<Message["generatedImage"]>) {
     setMessages((prev) =>
       prev.map((message) =>
@@ -1315,8 +1324,9 @@ export default function ChatPage() {
       .filter((image): image is LumaInlineImage => image !== null);
     const source = lumaImages[0] || null;
     const imageRef = source ? lumaImages.slice(1) : [];
+    const sourceGenerationId = source ? null : latestGeneratedImage?.id || null;
     const inputPreviewImages = attachedFiles.map(imageAttachmentToBase64);
-    const isImageEdit = !!source;
+    const isImageEdit = !!source || !!sourceGenerationId;
 
     const userMessage: Message = {
       role: "user",
@@ -1349,6 +1359,7 @@ export default function ChatPage() {
           outputFormat: lumaOutputFormat || null,
           webSearch: lumaWebSearch,
           source,
+          sourceGenerationId,
           imageRef,
         }),
       });
@@ -2055,6 +2066,11 @@ export default function ChatPage() {
                   >
                     Add Luma key
                   </Link>
+                )}
+                {lumaConfigured && latestGeneratedImage && attachedFiles.length === 0 && (
+                  <span className="text-xs text-fuchsia-600 dark:text-fuchsia-400">
+                    Editing latest image
+                  </span>
                 )}
               </>
             )}

@@ -7,6 +7,7 @@ import {
   lumaAssistantContent,
   lumaErrorPayload,
   lumaRowToGeneratedImage,
+  lumaSourceFromStoredGeneration,
   normalizeLumaCreateInput,
 } from "@/lib/luma";
 import type { Message } from "@/lib/types";
@@ -27,6 +28,8 @@ export async function POST(req: NextRequest) {
       webSearch?: boolean;
       web_search?: boolean;
       source?: unknown;
+      sourceGenerationId?: string | null;
+      source_generation_id?: string | null;
       imageRef?: unknown;
       image_ref?: unknown;
     };
@@ -34,6 +37,16 @@ export async function POST(req: NextRequest) {
     const apiKey = await getLumaApiKey();
     if (!apiKey) {
       return json({ error: "Add a Luma API key in Settings before generating images." }, 400);
+    }
+
+    const sourceGenerationId =
+      typeof body.sourceGenerationId === "string"
+        ? body.sourceGenerationId
+        : typeof body.source_generation_id === "string"
+          ? body.source_generation_id
+          : null;
+    if (!body.source && sourceGenerationId) {
+      body.source = await lumaSourceFromStoredGeneration(sourceGenerationId);
     }
 
     const request = normalizeLumaCreateInput(body);

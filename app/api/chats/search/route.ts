@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { query, toVectorString, getUserId } from "@/lib/db";
-import { embed } from "@/lib/embeddings";
+import { embedWithSource, embeddingColumnForSource } from "@/lib/embeddings";
 
 export const runtime = "nodejs";
 
@@ -39,11 +39,13 @@ export async function GET(req: NextRequest) {
     }
 
     // Vector mode: cosine similarity over chunks, plus union with title matches
-    const vec = toVectorString(await embed(q));
+    const embedding = await embedWithSource(q);
+    const col = embeddingColumnForSource(embedding.source);
+    const vec = toVectorString(embedding.vector);
     const chunkRows = await query<{ chat_id: string; distance: number }>(
-      `SELECT chat_id, MIN(embedding <=> $1::vector) AS distance
+      `SELECT chat_id, MIN(${col} <=> $1::vector) AS distance
        FROM s2m_transcript_chunks
-       WHERE user_id = $2
+       WHERE user_id = $2 AND ${col} IS NOT NULL
        GROUP BY chat_id
        ORDER BY distance ASC
        LIMIT 25`,

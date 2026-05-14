@@ -1,10 +1,5 @@
 import { query, toVectorString, getUserId } from "@/lib/db";
-import { embedWithSource, embedBatchWithSource, getEmbeddingSource } from "@/lib/embeddings";
-
-// Which column to use based on embedding source
-function embCol(source: "openai" | "ollama"): string {
-  return source === "openai" ? "embedding_oai" : "embedding";
-}
+import { embedWithSource, embedBatchWithSource, embeddingColumnForSource } from "@/lib/embeddings";
 
 // Split a transcript into ~1000 char chunks at sentence/message boundaries
 export function chunkTranscript(transcript: string, maxChars = 1000): string[] {
@@ -38,7 +33,7 @@ export async function embedAndStoreChunks(
   await query(`DELETE FROM s2m_transcript_chunks WHERE chat_id = $1`, [chatId]);
 
   const results = await embedBatchWithSource(chunks);
-  const col = embCol(results[0].source);
+  const col = embeddingColumnForSource(results[0].source);
 
   for (let i = 0; i < chunks.length; i++) {
     await query(
@@ -63,7 +58,7 @@ export async function embedExchange(
   if (!text || text.length < 20) return;
 
   const result = await embedWithSource(text.slice(0, 1000));
-  const col = embCol(result.source);
+  const col = embeddingColumnForSource(result.source);
 
   await query(
     `INSERT INTO s2m_transcript_chunks (user_id, chat_id, chunk_text, chunk_index, ${col})
@@ -80,7 +75,7 @@ export async function searchChunksInChat(
 ): Promise<{ chunk_text: string; distance: number }[]> {
   const userId = await getUserId();
   const result = await embedWithSource(queryText);
-  const col = embCol(result.source);
+  const col = embeddingColumnForSource(result.source);
   const vector = toVectorString(result.vector);
 
   return query(
@@ -101,7 +96,7 @@ export async function searchChunks(
 ): Promise<{ chunk_text: string; distance: number; chat_id: string; chat_created_at: Date }[]> {
   const userId = await getUserId();
   const result = await embedWithSource(queryText);
-  const col = embCol(result.source);
+  const col = embeddingColumnForSource(result.source);
   const vector = toVectorString(result.vector);
 
   if (excludeChatId) {

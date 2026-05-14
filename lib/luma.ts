@@ -366,6 +366,18 @@ export async function getLumaGeneration(id: string): Promise<LumaGenerationRow |
   );
 }
 
+export async function lumaSourceFromStoredGeneration(id: string): Promise<LumaInlineImage> {
+  const row = await getLumaGeneration(id);
+  if (!row) throw new Error("Source image not found");
+  if (row.state !== "completed" || !row.local_image) {
+    throw new Error("Source image is not ready yet");
+  }
+  return {
+    data: Buffer.from(row.local_image).toString("base64"),
+    media_type: row.local_mime_type || "image/png",
+  };
+}
+
 export async function updateLumaGenerationFromRemote(input: {
   id: string;
   generation: LumaGenerationResponse;
@@ -482,6 +494,7 @@ export function lumaErrorPayload(err: unknown): {
       err.message.startsWith("Prompt ") ||
       err.message.startsWith("Invalid ") ||
       err.message.startsWith("source") ||
+      err.message.startsWith("Source ") ||
       err.message.startsWith("image_ref") ||
       err.message.startsWith("Image ");
     return { error: err.message, status: isValidationError ? 400 : undefined };
