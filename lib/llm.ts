@@ -113,6 +113,85 @@ interface ResolvedProvider {
   model: string;
 }
 
+type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+
+const SUPPORTED_IMAGE_MEDIA_TYPES: ImageMediaType[] = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+];
+
+function splitImageData(image: string): { base64: string; declaredMediaType: string | null } {
+  const trimmed = image.trim();
+  const match = trimmed.match(/^data:([^;]+);base64,(.*)$/i);
+  if (!match) return { base64: trimmed, declaredMediaType: null };
+  return { base64: match[2], declaredMediaType: normalizeImageMediaType(match[1]) };
+}
+
+function normalizeImageMediaType(mediaType: string): string {
+  const normalized = mediaType.trim().toLowerCase();
+  return normalized === "image/jpg" ? "image/jpeg" : normalized;
+}
+
+function isSupportedImageMediaType(mediaType: string | null): mediaType is ImageMediaType {
+  return !!mediaType && SUPPORTED_IMAGE_MEDIA_TYPES.includes(mediaType as ImageMediaType);
+}
+
+export function detectImageMediaType(image: string): ImageMediaType {
+  const { base64, declaredMediaType } = splitImageData(image);
+  const bytes = Buffer.from(base64.replace(/\s/g, "").slice(0, 64), "base64");
+
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+  if (
+    bytes.length >= 6 &&
+    bytes[0] === 0x47 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x38
+  ) {
+    return "image/gif";
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+
+  return isSupportedImageMediaType(declaredMediaType) ? declaredMediaType : "image/png";
+}
+
+function imageBase64Payload(image: string): string {
+  return splitImageData(image).base64;
+}
+
+function imageDataUrl(image: string): string {
+  return `data:${detectImageMediaType(image)};base64,${imageBase64Payload(image)}`;
+}
+
 // Resolve which provider/model to use for this request
 async function resolveProvider(
   options: ChatOptions
@@ -367,7 +446,7 @@ function openaiBody(
         for (const img of m.images) {
           content.push({
             type: "image_url",
-            image_url: { url: `data:image/png;base64,${img}` },
+            image_url: { url: imageDataUrl(img) },
           });
         }
         if (m.content) {
@@ -488,8 +567,8 @@ function anthropicBody(
             type: "image",
             source: {
               type: "base64",
-              media_type: "image/png",
-              data: img,
+              media_type: detectImageMediaType(img),
+              data: imageBase64Payload(img),
             },
           });
         }
