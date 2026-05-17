@@ -259,9 +259,6 @@ export async function POST(req: NextRequest) {
               // Next.js kills the execution context after controller.close(),
               // so fire-and-forget calls after close() never complete.
 
-              generation?.end({ output: assistantContent });
-              trace?.update({ output: assistantContent });
-
               // Log usage with REAL token counts from the API (not estimates)
               const actualModel = chunk.model || body.model || undefined;
               let usageProvider = "ollama";
@@ -271,6 +268,17 @@ export async function POST(req: NextRequest) {
               }
               const tokensIn = chunk.usage?.inputTokens || Math.round(assistantContent.length / 4);
               const tokensOut = chunk.usage?.outputTokens || Math.round(assistantContent.length / 4);
+              if (!assistantContent.trim()) {
+                throw new Error(
+                  `Provider returned no assistant text for ${actualModel || "the selected model"} ` +
+                  `(${tokensIn.toLocaleString()} input tokens, ${tokensOut.toLocaleString()} output tokens). ` +
+                  "Try again, or switch to a non-reasoning model if this keeps happening."
+                );
+              }
+
+              generation?.end({ output: assistantContent });
+              trace?.update({ output: assistantContent });
+
               logUsage({ provider: usageProvider, service: "chat", model: actualModel, units: tokensIn, unitType: "tokens_in" });
               logUsage({ provider: usageProvider, service: "chat", model: actualModel, units: tokensOut, unitType: "tokens_out" });
 
@@ -334,6 +342,13 @@ export async function POST(req: NextRequest) {
             statusMessage: err instanceof Error ? err.message : String(err),
           });
           const message = err instanceof Error ? err.message : String(err);
+          await updateChat(finalChatId, [
+            ...body.messages,
+            { role: "assistant", content: `Error: ${message}` },
+          ], {
+            model: body.model || null,
+            providerId: body.providerId || null,
+          }).catch(() => {});
           const errChunk = JSON.stringify({ error: message, done: true });
           controller.enqueue(encoder.encode(`data: ${errChunk}\n\n`));
           controller.close();
