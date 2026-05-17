@@ -424,27 +424,39 @@ export async function getSmartFacts(
     }
   };
 
+  // Run all database and vector search queries concurrently
+  const pinnedPromise = getPinnedFacts(30);
+  
+  const relevantPromise = queryText && queryText.length > 5
+    ? searchFacts(queryText, 50).catch((err) => {
+        console.error("[facts] vector search failed:", err);
+        return [];
+      })
+    : Promise.resolve([]);
+
+  const recentPromise = getActiveFacts(totalLimit);
+
+  const [pinned, relevant, recent] = await Promise.all([
+    pinnedPromise,
+    relevantPromise,
+    recentPromise,
+  ]);
+
   // 1. Always include identity/family facts (who the user IS)
-  const pinned = await getPinnedFacts(30);
   add(pinned);
 
   // 2. Vector-search for facts relevant to what the user is asking
-  if (queryText && queryText.length > 5) {
-    try {
-      const relevant = await searchFacts(queryText, 50);
-      // Only include facts with reasonable similarity
-      add(relevant.filter((f) => f.distance < 0.65));
-    } catch (err) {
-      console.error("[facts] vector search failed:", err);
-    }
+  if (relevant.length > 0) {
+    // Only include facts with reasonable similarity
+    add(relevant.filter((f) => f.distance < 0.65));
   }
 
   // 3. Fill remaining slots with most recent facts
-  const recent = await getActiveFacts(totalLimit);
   add(recent);
 
   return result;
 }
+
 
 // Delete a single fact (mark inactive)
 export async function deleteFact(factId: string): Promise<void> {
