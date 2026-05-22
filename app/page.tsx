@@ -65,6 +65,7 @@ export default function ChatPage() {
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const [selectedProviderModel, setSelectedProviderModel] = useState<string | null>(null);
   const [customProviders, setCustomProviders] = useState<ProviderListItem[]>([]);
+  const [providersLoaded, setProvidersLoaded] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   // Parallel array holding the raw File objects for pending text/PDF uploads.
   // Images don't need this because their content is already a data URL on attach.
@@ -619,6 +620,12 @@ export default function ChatPage() {
   // Load sidebar state
   const sidebarLoadedRef = useRef(false);
   useEffect(() => {
+    const isMobile = window.matchMedia("(max-width: 767px)").matches;
+    if (isMobile) {
+      setSidebarOpen(false);
+      setTimeout(() => { sidebarLoadedRef.current = true; }, 0);
+      return;
+    }
     const saved = localStorage.getItem(SIDEBAR_STORAGE_KEY);
     if (saved !== null) setSidebarOpen(saved === "true");
     setTimeout(() => { sidebarLoadedRef.current = true; }, 0);
@@ -943,11 +950,22 @@ export default function ChatPage() {
       }
     } catch (err) {
       console.error("Failed to load providers:", err);
+    } finally {
+      setProvidersLoaded(true);
     }
   }
   useEffect(() => {
     refreshProviders();
   }, []);
+
+  useEffect(() => {
+    if (!providersLoaded || !selectedProviderId) return;
+    if (!customProviders.some((p) => p.id === selectedProviderId)) {
+      setSelectedProviderId(null);
+      setSelectedProviderModel(null);
+      localStorage.setItem(MODEL_STORAGE_KEY, `ollama:${selectedModel}`);
+    }
+  }, [customProviders, providersLoaded, selectedModel, selectedProviderId]);
 
   // Keep ref in sync so the beforeunload handler can read the latest value
   useEffect(() => {
@@ -1687,7 +1705,7 @@ export default function ChatPage() {
 
   return (
     <div
-      className="flex h-screen bg-zinc-50 dark:bg-zinc-950 relative"
+      className="relative flex h-dvh w-full overflow-hidden bg-zinc-50 dark:bg-zinc-950"
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -1715,14 +1733,14 @@ export default function ChatPage() {
       />
 
       {/* Main column */}
-      <div className="flex flex-col flex-1 min-w-0 h-screen">
+      <div className="flex h-dvh w-full min-w-0 flex-1 flex-col">
       {/* Header */}
-      <header className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <header className="flex items-center justify-between gap-2 overflow-hidden border-b border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900 sm:px-4 sm:py-3">
+        <div className="flex min-w-0 flex-shrink-0 items-center gap-2 sm:gap-3">
           {!sidebarOpen && (
             <button
               onClick={() => setSidebarOpen(true)}
-              className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 transition-colors"
+              className="flex-shrink-0 rounded-md p-1.5 text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
               title="Open sidebar"
             >
               <SidebarIcon />
@@ -1733,18 +1751,18 @@ export default function ChatPage() {
           {!sidebarOpen && (
             <>
               <Logo size={20} className="text-zinc-900 dark:text-zinc-100" />
-              <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+              <h1 className="truncate text-base font-semibold text-zinc-900 dark:text-zinc-100 sm:text-lg">
                 RecallMEM
               </h1>
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              <span className="hidden text-xs text-zinc-500 dark:text-zinc-400 sm:inline">
                 Local · Private
               </span>
             </>
           )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5 overflow-hidden sm:gap-3">
           {isFinalizing && (
-            <span className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
+            <span className="hidden items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400 sm:flex">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse" />
               Saving memory...
             </span>
@@ -1756,24 +1774,26 @@ export default function ChatPage() {
             if (totalIn === 0 && totalOut === 0) return null;
             const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
             return (
-              <span className="text-[10px] text-zinc-400 font-mono whitespace-nowrap">
+              <span className="hidden whitespace-nowrap font-mono text-[10px] text-zinc-400 sm:inline">
                 {fmt(totalIn)} in / {fmt(totalOut)} out
               </span>
             );
           })()}
-          <ModelPicker
-            modelId={selectedModel}
-            providerId={selectedProviderId}
-            selectedModel={selectedProviderModel}
-            onSelectOllama={handleOllamaSelect}
-            onSelectProvider={(id, model) => {
-              setSelectedProviderId(id);
-              setSelectedProviderModel(model || null);
-            }}
-            customProviders={customProviders}
-            disabled={isBusy || isFinalizing}
-          />
-          <div className="group relative">
+          <div className="hidden sm:block">
+            <ModelPicker
+              modelId={selectedModel}
+              providerId={selectedProviderId}
+              selectedModel={selectedProviderModel}
+              onSelectOllama={handleOllamaSelect}
+              onSelectProvider={(id, model) => {
+                setSelectedProviderId(id);
+                setSelectedProviderModel(model || null);
+              }}
+              customProviders={customProviders}
+              disabled={isBusy || isFinalizing}
+            />
+          </div>
+          <div className="group relative hidden sm:block">
             <button
               onClick={() => setPrivateMode((v) => !v)}
               className={`w-9 h-9 flex items-center justify-center rounded-md border transition-colors ${
@@ -1796,15 +1816,17 @@ export default function ChatPage() {
           </div>
           <Link
             href="/settings"
-            className="px-3 py-1.5 text-sm font-medium rounded-md border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-700 dark:text-zinc-300"
+            aria-label="Settings"
+            className="inline-flex h-9 flex-shrink-0 items-center justify-center rounded-md border border-zinc-200 px-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:h-auto sm:px-3 sm:py-1.5"
           >
-            Settings
+            <span className="hidden sm:inline">Settings</span>
+            <span className="sm:hidden"><SettingsIcon /></span>
           </Link>
           <Link
             href="/memory"
             title="Memory"
             aria-label="Memory"
-            className="group relative p-2 rounded-md border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-zinc-700 dark:text-zinc-300"
+            className="group relative hidden rounded-md border border-zinc-200 p-2 text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:block"
           >
             <BrainIcon />
             {/* Custom tooltip on hover (in addition to the native title attribute) */}
@@ -1842,9 +1864,9 @@ export default function ChatPage() {
           setShowScrollDown(distFromBottom > 300);
         }}
       >
-        <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+        <div className="mx-auto max-w-3xl space-y-6 px-3 py-4 sm:px-4 sm:py-6">
           {messages.length === 0 ? (
-            <div className="text-center py-20">
+            <div className="py-16 text-center sm:py-20">
               <p className="text-zinc-500 dark:text-zinc-400 text-sm">
                 Start a conversation. Everything stays on your machine.
                 <br />
@@ -1965,8 +1987,23 @@ export default function ChatPage() {
       )}
 
       {/* Input */}
-      <div className="border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+      <div className="border-t border-zinc-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] dark:border-zinc-800 dark:bg-zinc-900 sm:p-4">
         <form onSubmit={sendMessage} className="max-w-3xl mx-auto">
+          <div className="mb-2 sm:hidden">
+            <ModelPicker
+              modelId={selectedModel}
+              providerId={selectedProviderId}
+              selectedModel={selectedProviderModel}
+              onSelectOllama={handleOllamaSelect}
+              onSelectProvider={(id, model) => {
+                setSelectedProviderId(id);
+                setSelectedProviderModel(model || null);
+              }}
+              customProviders={customProviders}
+              disabled={isBusy || isFinalizing}
+              variant="mobile"
+            />
+          </div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <div className="flex rounded-lg bg-zinc-100 dark:bg-zinc-800 p-1">
               <button
@@ -2011,7 +2048,7 @@ export default function ChatPage() {
                   value={lumaAspectRatio}
                   onChange={(e) => setLumaAspectRatio(e.target.value as LumaAspectRatioOption)}
                   disabled={isBusy}
-                  className="h-8 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 text-xs text-zinc-700 dark:text-zinc-300 disabled:opacity-50"
+                  className="h-8 min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 text-xs text-zinc-700 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 sm:flex-none"
                   title="Aspect ratio"
                 >
                   {LUMA_ASPECT_RATIOS.map((ratio) => (
@@ -2024,7 +2061,7 @@ export default function ChatPage() {
                   value={lumaStyle}
                   onChange={(e) => setLumaStyle(e.target.value as LumaStyleOption)}
                   disabled={isBusy}
-                  className="h-8 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 text-xs text-zinc-700 dark:text-zinc-300 disabled:opacity-50"
+                  className="h-8 min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 text-xs text-zinc-700 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 sm:flex-none"
                   title="Style"
                 >
                   {LUMA_STYLES.map((style) => (
@@ -2037,7 +2074,7 @@ export default function ChatPage() {
                   value={lumaOutputFormat}
                   onChange={(e) => setLumaOutputFormat(e.target.value as LumaOutputFormatOption)}
                   disabled={isBusy}
-                  className="h-8 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 text-xs text-zinc-700 dark:text-zinc-300 disabled:opacity-50"
+                  className="h-8 min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 text-xs text-zinc-700 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 sm:flex-none"
                   title="Output format"
                 >
                   {LUMA_OUTPUT_FORMATS.map((format) => (
@@ -2050,7 +2087,7 @@ export default function ChatPage() {
                   type="button"
                   onClick={() => setLumaWebSearch((v) => !v)}
                   disabled={isBusy}
-                  className={`h-8 px-2.5 rounded-md border text-xs font-medium transition-colors disabled:opacity-50 ${
+                  className={`h-8 flex-shrink-0 rounded-md border px-2.5 text-xs font-medium transition-colors disabled:opacity-50 ${
                     lumaWebSearch
                       ? "border-fuchsia-300 dark:border-fuchsia-800 bg-fuchsia-50 dark:bg-fuchsia-950 text-fuchsia-700 dark:text-fuchsia-300"
                       : "border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
@@ -2098,7 +2135,7 @@ export default function ChatPage() {
             onChange={handleFileInputChange}
             className="hidden"
           />
-          <div className="flex items-center gap-1 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2 focus-within:ring-2 focus-within:ring-zinc-300 dark:focus-within:ring-zinc-700">
+          <div className="flex min-w-0 items-center gap-1 rounded-2xl border border-zinc-200 bg-white px-2 focus-within:ring-2 focus-within:ring-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:focus-within:ring-zinc-700">
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -2164,7 +2201,7 @@ export default function ChatPage() {
               }
               rows={1}
               disabled={composerDisabled}
-              className="flex-1 resize-none bg-transparent py-3 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none disabled:opacity-50"
+              className="min-w-0 flex-1 resize-none bg-transparent py-3 text-base text-zinc-900 placeholder:text-zinc-400 focus:outline-none disabled:opacity-50 dark:text-zinc-100 sm:text-sm"
             />
             {/* Mic button — STT dictation */}
             <button
@@ -2184,7 +2221,18 @@ export default function ChatPage() {
                 <line x1="12" y1="19" x2="12" y2="22" />
               </svg>
             </button>
-            {/* Voice Agent button — disabled for now, needs more work */}
+            {composerMode === "chat" && (
+              <button
+                type="button"
+                onClick={() => setShowVoiceAgent(true)}
+                disabled={isBusy}
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-30 dark:text-zinc-400 dark:hover:bg-emerald-950 dark:hover:text-emerald-300"
+                title="Start Voice Agent"
+                aria-label="Start Voice Agent"
+              >
+                <VoiceAgentIcon />
+              </button>
+            )}
             {isStreaming ? (
               <button
                 type="button"
@@ -2354,7 +2402,18 @@ export default function ChatPage() {
 
       {/* Voice Agent modal */}
       {showVoiceAgent && (
-        <VoiceAgent onClose={() => setShowVoiceAgent(false)} />
+        <VoiceAgent
+          chatId={chatId}
+          messages={messages}
+          privateMode={privateMode}
+          onSaved={(savedChatId, savedMessages) => {
+            setChatId(savedChatId);
+            chatIdRef.current = savedChatId;
+            setMessages(savedMessages);
+            refreshChatList();
+          }}
+          onClose={() => setShowVoiceAgent(false)}
+        />
       )}
 
       {/* First-time web search privacy warning (local providers only) */}
@@ -2539,7 +2598,14 @@ function Sidebar({
   const dateGroups = groupChatsByDate(unpinned);
 
   return (
-    <aside className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-col">
+    <>
+    <button
+      type="button"
+      aria-label="Close sidebar"
+      className="fixed inset-0 z-30 bg-black/40 backdrop-blur-[1px] md:hidden"
+      onClick={onClose}
+    />
+    <aside className="fixed inset-y-0 left-0 z-40 flex w-[min(20rem,86vw)] flex-col border-r border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 md:relative md:inset-auto md:z-auto md:w-64 md:flex-shrink-0 md:shadow-none">
       {/* Header */}
       <div className="px-3 py-3 flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800">
         <div className="flex items-center gap-2 px-2">
@@ -2700,6 +2766,7 @@ function Sidebar({
       {/* Footer with copyright and social links */}
       <AppFooter />
     </aside>
+    </>
   );
 }
 
@@ -2969,6 +3036,24 @@ function BrainIcon() {
       <path d="M3.477 10.896a4 4 0 0 1 .585-.396m0 0c.34-.225.674-.4 1-.508a3 3 0 0 1 1.45-.246" />
       <path d="M6 18a4 4 0 0 1-1.967-.516" />
       <path d="M19.967 17.484A4 4 0 0 1 18 18" />
+    </svg>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 8.92 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.38.4.6.93.6 1.5H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
     </svg>
   );
 }
@@ -3365,6 +3450,7 @@ function ModelPicker({
   onSelectProvider,
   customProviders,
   disabled,
+  variant = "header",
 }: {
   modelId: ModelId;
   providerId: string | null;
@@ -3373,6 +3459,7 @@ function ModelPicker({
   onSelectProvider: (id: string, model?: string) => void;
   customProviders: ProviderListItem[];
   disabled: boolean;
+  variant?: "header" | "mobile";
 }) {
   const value = providerId
     ? `provider:${providerId}::${selectedModel || ""}`
@@ -3406,13 +3493,19 @@ function ModelPicker({
     }
   }
 
+  const isMobile = variant === "mobile";
+
   return (
-    <div className="relative">
+    <div className={isMobile ? "relative w-full" : "relative min-w-0 shrink"}>
       <select
         value={value}
         onChange={(e) => handleChange(e.target.value)}
         disabled={disabled}
-        className="appearance-none px-3 py-1.5 pr-8 text-xs font-medium rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700"
+        className={
+          isMobile
+            ? "h-10 w-full cursor-pointer appearance-none truncate rounded-xl border border-zinc-200 bg-white px-3 pr-8 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700"
+            : "w-[42vw] max-w-[15rem] cursor-pointer appearance-none truncate rounded-md border border-zinc-200 bg-white px-3 py-1.5 pr-8 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700 sm:w-auto sm:max-w-[22rem]"
+        }
       >
         <optgroup label="Local (Ollama)">
           {MODEL_OPTIONS.map((opt) => (
@@ -3482,6 +3575,29 @@ function ArrowUpIcon() {
     >
       <path d="m5 12 7-7 7 7" />
       <path d="M12 19V5" />
+    </svg>
+  );
+}
+
+function VoiceAgentIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 13a8 8 0 0 1 16 0" />
+      <path d="M7 13v3a2 2 0 0 1-2 2H4v-5h1a2 2 0 0 1 2 2Z" />
+      <path d="M17 13v3a2 2 0 0 0 2 2h1v-5h-1a2 2 0 0 0-2 2Z" />
+      <path d="M9 19c1 .7 2 .9 3 .9s2-.2 3-.9" />
+      <path d="M12 8v4" />
+      <path d="M10 10h4" />
     </svg>
   );
 }

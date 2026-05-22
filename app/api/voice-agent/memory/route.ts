@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { searchFacts, getPinnedFacts } from "@/lib/facts";
+import { searchFacts } from "@/lib/facts";
 import { searchChunks } from "@/lib/chunks";
 
 export const runtime = "nodejs";

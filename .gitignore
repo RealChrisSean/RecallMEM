@@ -61,6 +61,7 @@ AGENTS.md
 chrisprofile.md
 .cursor/
 .aider*
+.sprite
 
 # Synced npm publish artifacts (regenerated from bin/ via scripts/sync-publish.js)
 publish/bin/

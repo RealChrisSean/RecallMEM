@@ -1,501 +1,640 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Message } from "@/lib/types";
+
+type VoiceStatus =
+  | "connecting"
+  | "listening"
+  | "thinking"
+  | "speaking"
+  | "error";
 
 interface VoiceAgentProps {
+  chatId: string | null;
+  messages: Message[];
+  privateMode: boolean;
+  onSaved: (chatId: string, messages: Message[]) => void;
   onClose: () => void;
 }
 
-export default function VoiceAgent({ onClose }: VoiceAgentProps) {
-  const [status, setStatus] = useState<"connecting" | "connected" | "speaking" | "listening" | "error">("connecting");
-  const [transcript, setTranscript] = useState<{ role: string; text: string; id: string }[]>([]);
+interface VoiceAgentConfig {
+  endpoint: string;
+  token: string;
+  authProtocol?: "bearer" | "token";
+  settings: Record<string, unknown>;
+}
+
+interface TranscriptItem {
+  id: string;
+  role: "user" | "assistant" | "system";
+  text: string;
+}
+
+interface DeepgramFunctionCall {
+  id: string;
+  name: string;
+  arguments?: string;
+  client_side?: boolean;
+}
+
+const INPUT_SAMPLE_RATE = 16000;
+const OUTPUT_SAMPLE_RATE = 24000;
+
+export default function VoiceAgent({
+  chatId,
+  messages,
+  privateMode,
+  onSaved,
+  onClose,
+}: VoiceAgentProps) {
+  const [status, setStatus] = useState<VoiceStatus>("connecting");
+  const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const captureContextRef = useRef<AudioContext | null>(null);
+  const playbackContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const playbackQueueRef = useRef<ArrayBuffer[]>([]);
-  const isPlayingRef = useRef(false);
+  const silenceGainRef = useRef<GainNode | null>(null);
+  const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
+  const playbackTimeRef = useRef(0);
+  const keepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
-  const currentAssistantTextRef = useRef("");
-  const assistantTurnIdRef = useRef("");
-  const assistantLockedRef = useRef(false);
-  const turnCountRef = useRef(0);
   const connectingRef = useRef(false);
+  const streamingAudioRef = useRef(false);
+  const chatIdRef = useRef(chatId);
+  const messagesRef = useRef<Message[]>(messages);
+  const lastSavedLengthRef = useRef(messages.length);
+  const lastConversationTextRef = useRef("");
+  const itemCounterRef = useRef(0);
 
-  // Auto-scroll transcript
+  useEffect(() => {
+    chatIdRef.current = chatId;
+  }, [chatId]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+    lastSavedLengthRef.current = messages.length;
+  }, [messages]);
+
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcript]);
 
-  // Timer
   useEffect(() => {
-    if (status === "connected" || status === "speaking" || status === "listening") {
-      timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
-    }
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [status]);
+    timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
 
-  const formatTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m}:${sec.toString().padStart(2, "0")}`;
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Convert Float32 PCM to 16-bit PCM and base64 encode
-  function float32ToBase64Pcm(float32: Float32Array): string {
+  function nextId(role: string) {
+    itemCounterRef.current += 1;
+    return `${role}-${Date.now()}-${itemCounterRef.current}`;
+  }
+
+  function float32ToPcm16(float32: Float32Array): ArrayBuffer {
     const int16 = new Int16Array(float32.length);
     for (let i = 0; i < float32.length; i++) {
-      const s = Math.max(-1, Math.min(1, float32[i]));
-      int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      const sample = Math.max(-1, Math.min(1, float32[i]));
+      int16[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
     }
-    const bytes = new Uint8Array(int16.buffer);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
+    return int16.buffer;
   }
 
-  // Decode base64 PCM audio and play it
-  function queueAudio(base64: string) {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
+  function resample(input: Float32Array, fromRate: number, toRate: number): Float32Array {
+    if (fromRate === toRate) return input;
+    const ratio = fromRate / toRate;
+    const outputLength = Math.max(1, Math.round(input.length / ratio));
+    const output = new Float32Array(outputLength);
+    for (let i = 0; i < outputLength; i++) {
+      output[i] = input[Math.min(input.length - 1, Math.round(i * ratio))];
     }
-    playbackQueueRef.current.push(bytes.buffer);
-    if (!isPlayingRef.current) playNext();
+    return output;
   }
 
-  function playNext() {
-    const ctx = audioContextRef.current;
-    if (!ctx || playbackQueueRef.current.length === 0) {
-      isPlayingRef.current = false;
-      return;
-    }
-    isPlayingRef.current = true;
+  function stopPlayback() {
+    activeSourcesRef.current.forEach((source) => {
+      try {
+        source.stop();
+      } catch {
+        // Already stopped.
+      }
+    });
+    activeSourcesRef.current = [];
+    playbackTimeRef.current = 0;
+  }
 
-    const buffer = playbackQueueRef.current.shift()!;
-    const int16 = new Int16Array(buffer);
+  function playPcm16(arrayBuffer: ArrayBuffer) {
+    if (arrayBuffer.byteLength === 0) return;
+    const ctx =
+      playbackContextRef.current ||
+      new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
+    playbackContextRef.current = ctx;
+
+    const int16 = new Int16Array(arrayBuffer.slice(0));
     const float32 = new Float32Array(int16.length);
     for (let i = 0; i < int16.length; i++) {
-      float32[i] = int16[i] / (int16[i] < 0 ? 0x8000 : 0x7FFF);
+      float32[i] = int16[i] / (int16[i] < 0 ? 0x8000 : 0x7fff);
     }
 
-    const audioBuffer = ctx.createBuffer(1, float32.length, 24000);
+    const audioBuffer = ctx.createBuffer(1, float32.length, OUTPUT_SAMPLE_RATE);
     audioBuffer.getChannelData(0).set(float32);
 
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(ctx.destination);
-    source.onended = () => playNext();
-    source.start();
+    source.onended = () => {
+      activeSourcesRef.current = activeSourcesRef.current.filter((s) => s !== source);
+    };
+
+    const startAt = Math.max(ctx.currentTime + 0.02, playbackTimeRef.current || 0);
+    playbackTimeRef.current = startAt + audioBuffer.duration;
+    activeSourcesRef.current.push(source);
+    source.start(startAt);
+    setStatus("speaking");
+  }
+
+  async function saveMessages(nextMessages: Message[]) {
+    if (nextMessages.length === 0 || nextMessages.length === lastSavedLengthRef.current) {
+      return;
+    }
+
+    const res = await fetch("/api/voice-agent/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chatId: chatIdRef.current,
+        messages: nextMessages,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error || `Save failed: ${res.status}`);
+    }
+
+    const data = (await res.json()) as { chatId: string };
+    lastSavedLengthRef.current = nextMessages.length;
+    chatIdRef.current = data.chatId;
+    onSaved(data.chatId, nextMessages);
+  }
+
+  function appendConversationText(role: "user" | "assistant", text: string) {
+    const cleaned = text.trim();
+    if (!cleaned) return;
+
+    const duplicateKey = `${role}:${cleaned}`;
+    if (lastConversationTextRef.current === duplicateKey) return;
+    lastConversationTextRef.current = duplicateKey;
+
+    setTranscript((prev) => [
+      ...prev,
+      { id: nextId(role), role, text: cleaned },
+    ]);
+
+    const nextMessages = [
+      ...messagesRef.current,
+      { role, content: cleaned } satisfies Message,
+    ];
+    messagesRef.current = nextMessages;
+
+    if (role === "assistant") {
+      saveMessages(nextMessages).catch((err) => {
+        console.error("[voice-agent] save failed:", err);
+        setError(err instanceof Error ? err.message : "Voice transcript save failed");
+      });
+    }
+  }
+
+  async function handleFunctionCalls(calls: DeepgramFunctionCall[]) {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    await Promise.all(
+      calls
+        .filter((fn) => fn.client_side !== false)
+        .map(async (fn) => {
+          let args: { query?: string } = {};
+          try {
+            args = JSON.parse(fn.arguments || "{}") as { query?: string };
+          } catch {
+            args = {};
+          }
+
+          let content = "Memory search failed. Answer based on the current conversation.";
+          if (fn.name === "search_memory" && args.query?.trim()) {
+            try {
+              const res = await fetch("/api/voice-agent/memory", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  query: args.query,
+                  chatId: chatIdRef.current,
+                }),
+              });
+              const result = (await res.json()) as {
+                facts?: string[];
+                conversations?: string[];
+              };
+              content = JSON.stringify({
+                facts: result.facts || [],
+                conversations: result.conversations || [],
+              });
+            } catch (err) {
+              console.error("[voice-agent] memory search failed:", err);
+            }
+          }
+
+          ws.send(
+            JSON.stringify({
+              type: "FunctionCallResponse",
+              id: fn.id,
+              name: fn.name,
+              content,
+            })
+          );
+        })
+    );
+  }
+
+  function startAudioStreaming(stream: MediaStream) {
+    const ws = wsRef.current;
+    if (!ws || streamingAudioRef.current) return;
+    streamingAudioRef.current = true;
+
+    const audioCtx = new AudioContext({ sampleRate: INPUT_SAMPLE_RATE });
+    captureContextRef.current = audioCtx;
+    const source = audioCtx.createMediaStreamSource(stream);
+    const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+    const silenceGain = audioCtx.createGain();
+    silenceGain.gain.value = 0;
+
+    processorRef.current = processor;
+    silenceGainRef.current = silenceGain;
+
+    processor.onaudioprocess = (event) => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      const input = event.inputBuffer.getChannelData(0);
+      const pcm = float32ToPcm16(
+        resample(input, audioCtx.sampleRate, INPUT_SAMPLE_RATE)
+      );
+      ws.send(pcm);
+    };
+
+    source.connect(processor);
+    processor.connect(silenceGain);
+    silenceGain.connect(audioCtx.destination);
   }
 
   const connect = useCallback(async () => {
-    // Prevent duplicate connections (React StrictMode runs effects twice).
-    // Don't check wsRef here — it may not be set yet if previous connect
-    // is still awaiting fetch. connectingRef is never reset by cleanup.
     if (connectingRef.current) return;
     connectingRef.current = true;
 
-    // If there's an existing connection from a previous mount, close it first
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-
     try {
-      const configRes = await fetch("/api/voice-agent");
-      if (!configRes.ok) {
-        setError("No xAI provider configured. Add your xAI API key in Settings.");
-        setStatus("error");
-        return;
-      }
-      const config = await configRes.json() as { apiKey: string; systemPrompt: string };
+      setStatus("connecting");
+      setError(null);
 
-      // Get mic
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const configRes = await fetch("/api/voice-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chatId: chatIdRef.current,
+          messages: messagesRef.current,
+          privateMode,
+        }),
+      });
+
+      const rawConfig = (await configRes.json().catch(() => ({}))) as
+        Partial<VoiceAgentConfig> & { error?: string };
+
+      if (!configRes.ok || !rawConfig.endpoint || !rawConfig.token || !rawConfig.settings) {
+        throw new Error(rawConfig.error || "Could not start Deepgram Voice Agent");
+      }
+
+      const config: VoiceAgentConfig = {
+        endpoint: rawConfig.endpoint,
+        token: rawConfig.token,
+        authProtocol: rawConfig.authProtocol === "token" ? "token" : "bearer",
+        settings: rawConfig.settings,
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: INPUT_SAMPLE_RATE,
+        },
+      });
       mediaStreamRef.current = stream;
 
-      // Create audio context at 24kHz for matching xAI's expected format
-      const audioCtx = new AudioContext({ sampleRate: 24000 });
-      audioContextRef.current = audioCtx;
-
-      // Connect WebSocket to xAI
-      const ws = new WebSocket("wss://api.x.ai/v1/realtime", [
-        "realtime",
-        `openai-insecure-api-key.${config.apiKey}`,
-        "openai-beta.realtime-v1",
+      const ws = new WebSocket(config.endpoint, [
+        config.authProtocol || "bearer",
+        config.token,
       ]);
+      ws.binaryType = "arraybuffer";
       wsRef.current = ws;
 
       ws.onopen = () => {
-        // Configure session with memory search tool
-        ws.send(JSON.stringify({
-          type: "session.update",
-          session: {
-            modalities: ["text", "audio"],
-            instructions: config.systemPrompt + `
-
-You have two tools that are ALWAYS active:
-
-1. search_memory — Search the user's personal memory database. ALWAYS call this on EVERY exchange. The user chose RecallMEM because it remembers them. Use the user's message as the search query to find relevant facts, past conversations, and context. This is your primary source of knowledge about the user.
-
-2. web_search — Search the internet for current information. Use this when the user asks about news, current events, companies, people, or anything that requires up-to-date information beyond what's in memory.
-
-You can call both tools in the same turn if needed.`,
-            voice: "eve",
-            input_audio_format: "pcm16",
-            output_audio_format: "pcm16",
-            input_audio_transcription: { model: "whisper-1" },
-            turn_detection: {
-              type: "server_vad",
-              threshold: 0.5,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 1000,
-            },
-            tools: [
-              {
-                type: "function",
-                name: "search_memory",
-                description: "Search the user's personal memory database for facts, past conversations, and context. Call this on EVERY user message to retrieve relevant memories.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    query: {
-                      type: "string",
-                      description: "Search query based on what the user is talking about.",
-                    },
-                  },
-                  required: ["query"],
-                },
-              },
-              { type: "web_search" },
-              { type: "x_search" },
-            ],
-          },
-        }));
-
-        setStatus("listening");
-
-        // Start streaming mic audio
-        const source = audioCtx.createMediaStreamSource(stream);
-        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-        processorRef.current = processor;
-
-        processor.onaudioprocess = (e) => {
-          if (ws.readyState !== WebSocket.OPEN) return;
-          const inputData = e.inputBuffer.getChannelData(0);
-
-          // Resample from audioCtx.sampleRate to 24000 if needed
-          let pcmData: Float32Array;
-          if (audioCtx.sampleRate !== 24000) {
-            const ratio = audioCtx.sampleRate / 24000;
-            const newLength = Math.round(inputData.length / ratio);
-            pcmData = new Float32Array(newLength);
-            for (let i = 0; i < newLength; i++) {
-              pcmData[i] = inputData[Math.round(i * ratio)];
-            }
-          } else {
-            pcmData = inputData;
+        ws.send(JSON.stringify(config.settings));
+        keepAliveRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "KeepAlive" }));
           }
-
-          ws.send(JSON.stringify({
-            type: "input_audio_buffer.append",
-            audio: float32ToBase64Pcm(pcmData),
-          }));
-        };
-
-        source.connect(processor);
-        processor.connect(audioCtx.destination);
+        }, 10000);
       };
 
       ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data as string) as Record<string, unknown>;
-        const type = msg.type as string;
-
-        // Log all messages for debugging
-        if (!type.includes("audio.delta") && !type.includes("input_audio_buffer")) {
-          console.log("[voice-agent]", type, msg);
+        if (event.data instanceof ArrayBuffer) {
+          playPcm16(event.data);
+          return;
         }
 
+        if (event.data instanceof Blob) {
+          event.data.arrayBuffer().then(playPcm16).catch(() => {});
+          return;
+        }
+
+        let msg: Record<string, unknown>;
+        try {
+          msg = JSON.parse(event.data as string) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+
+        const type = msg.type as string | undefined;
+        if (!type) return;
+
         switch (type) {
-          // xAI uses "response.output_audio.delta" (not "response.audio.delta")
-          case "response.output_audio.delta":
-          case "response.audio.delta":
-            if (msg.delta) {
-              setStatus("speaking");
-              queueAudio(msg.delta as string);
-            }
+          case "Welcome":
             break;
 
-          case "response.output_audio_transcript.delta": {
-            if (msg.delta && !assistantLockedRef.current) {
-              currentAssistantTextRef.current += msg.delta as string;
-              const text = currentAssistantTextRef.current;
-              const turnId = assistantTurnIdRef.current;
-              setTranscript((prev) => {
-                const lastIdx = prev.findLastIndex((t) => t.role === "assistant" && t.id === turnId);
-                if (lastIdx >= 0) {
-                  const updated = [...prev];
-                  updated[lastIdx] = { role: "assistant", text, id: turnId };
-                  return updated;
-                }
-                return [...prev, { role: "assistant", text, id: turnId }];
-              });
-            }
-            break;
-          }
-
-          case "response.created": {
-            currentAssistantTextRef.current = "";
-            assistantTurnIdRef.current = `turn-${Date.now()}`;
-            assistantLockedRef.current = false;
-            break;
-          }
-
-          case "response.output_audio_transcript.done": {
-            // Self-healing: replace bubble text with the clean final transcript.
-            // This fixes any duplication from duplicate events or double connections.
-            assistantLockedRef.current = true;
-            const finalText = msg.transcript as string;
-            if (finalText) {
-              const turnId = assistantTurnIdRef.current;
-              currentAssistantTextRef.current = finalText;
-              setTranscript((prev) => {
-                const lastIdx = prev.findLastIndex((t) => t.role === "assistant" && t.id === turnId);
-                if (lastIdx >= 0) {
-                  const updated = [...prev];
-                  updated[lastIdx] = { role: "assistant", text: finalText, id: turnId };
-                  return updated;
-                }
-                return prev;
-              });
-            }
-            break;
-          }
-
-          // Ignore ALL other transcript events
-          case "response.audio_transcript.delta":
-          case "response.audio_transcript.done":
-          case "response.text.delta":
-          case "response.text.done":
-          case "response.content_part.done":
+          case "SettingsApplied":
+            setStatus("listening");
+            startAudioStreaming(stream);
             break;
 
-          case "conversation.item.input_audio_transcription.completed": {
-            const transcriptText = msg.transcript as string;
-            if (transcriptText?.trim()) {
-              const turnId = `user-${turnCountRef.current++}`;
-              setTranscript((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.role === "user" && last.text === transcriptText.trim()) return prev;
-                return [...prev, { role: "user", text: transcriptText.trim(), id: turnId }];
-              });
-            }
-            break;
-          }
-
-          case "response.done":
+          case "UserStartedSpeaking":
+            stopPlayback();
             setStatus("listening");
             break;
 
-          // Function calling — Grok wants to search memory
-          case "response.function_call_arguments.done": {
-            const fnName = msg.name as string;
-            const callId = msg.call_id as string;
-            const args = JSON.parse((msg.arguments as string) || "{}");
-            console.log("[voice-agent] function call:", fnName, args);
+          case "AgentThinking":
+            setStatus("thinking");
+            break;
 
-            if (fnName === "search_memory" && args.query) {
-              // Hit our memory search API
-              fetch("/api/voice-agent/memory", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: args.query }),
-              })
-                .then((r) => r.json())
-                .then((results: { facts: string[]; conversations: string[] }) => {
-                  const output = [
-                    results.facts.length > 0 ? `Relevant facts:\n${results.facts.join("\n")}` : "No relevant facts found.",
-                    results.conversations.length > 0 ? `\nFrom past conversations:\n${results.conversations.join("\n\n")}` : "",
-                  ].join("\n");
-
-                  // Send function result back to Grok
-                  ws.send(JSON.stringify({
-                    type: "conversation.item.create",
-                    item: {
-                      type: "function_call_output",
-                      call_id: callId,
-                      output,
-                    },
-                  }));
-                  // Trigger Grok to respond with the new context
-                  ws.send(JSON.stringify({ type: "response.create" }));
-                })
-                .catch((err) => {
-                  console.error("[voice-agent] memory search failed:", err);
-                  ws.send(JSON.stringify({
-                    type: "conversation.item.create",
-                    item: {
-                      type: "function_call_output",
-                      call_id: callId,
-                      output: "Memory search failed. Answer based on what you already know.",
-                    },
-                  }));
-                  ws.send(JSON.stringify({ type: "response.create" }));
-                });
+          case "ConversationText": {
+            const role = msg.role as "user" | "assistant" | undefined;
+            const content = msg.content as string | undefined;
+            if (role === "user" || role === "assistant") {
+              appendConversationText(role, content || "");
+              setStatus(role === "user" ? "thinking" : "speaking");
             }
             break;
           }
 
-          case "ping":
-            // Respond to keep-alive pings
-            ws.send(JSON.stringify({ type: "pong" }));
-            break;
-
-          case "error": {
-            const errObj = msg.error as Record<string, unknown> | undefined;
-            console.error("[voice-agent] error:", msg);
-            setError((errObj?.message as string) || "Voice agent error");
+          case "FunctionCallRequest": {
+            const functions = (msg.functions || []) as DeepgramFunctionCall[];
+            handleFunctionCalls(functions).catch((err) => {
+              console.error("[voice-agent] function handling failed:", err);
+            });
             break;
           }
 
-          case "session.created":
-          case "session.updated":
-          case "conversation.created":
-            console.log("[voice-agent] session ready");
+          case "AgentAudioDone":
+            setStatus("listening");
+            break;
+
+          case "Warning":
+            console.warn("[voice-agent] warning:", msg);
+            break;
+
+          case "Error":
+            console.error("[voice-agent] error:", msg);
+            setError(
+              (msg.description as string | undefined) ||
+                (msg.message as string | undefined) ||
+                "Deepgram Voice Agent error"
+            );
+            setStatus("error");
             break;
 
           default:
-            // Log unhandled events for debugging
-            if (!type.includes("audio") && !type.includes("input_audio")) {
-              console.log("[voice-agent] unhandled:", type);
+            if (!type.toLowerCase().includes("audio")) {
+              console.log("[voice-agent] unhandled:", type, msg);
             }
-            break;
         }
       };
 
-      ws.onerror = (e) => {
-        console.error("[voice-agent] ws error:", e);
-        setError("WebSocket connection failed");
+      ws.onerror = (event) => {
+        console.error("[voice-agent] websocket error:", event);
+        setError("Deepgram Voice Agent connection failed");
         setStatus("error");
       };
 
-      ws.onclose = (e) => {
-        console.log("[voice-agent] ws closed:", e.code, e.reason);
+      ws.onclose = () => {
         if (status !== "error") setStatus("connecting");
         cleanup();
       };
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to connect");
+      setError(err instanceof Error ? err.message : "Failed to start Voice Agent");
       setStatus("error");
+      cleanup();
     }
-  }, []);
+  // Connect once for the life of the modal. Helper functions read/write refs
+  // intentionally so reconnects do not happen on transcript state updates.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [privateMode]);
 
   function cleanup() {
+    if (keepAliveRef.current) {
+      clearInterval(keepAliveRef.current);
+      keepAliveRef.current = null;
+    }
     if (processorRef.current) {
       processorRef.current.disconnect();
       processorRef.current = null;
     }
+    if (silenceGainRef.current) {
+      silenceGainRef.current.disconnect();
+      silenceGainRef.current = null;
+    }
     if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
     }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
+    if (captureContextRef.current) {
+      captureContextRef.current.close().catch(() => {});
+      captureContextRef.current = null;
+    }
+    stopPlayback();
+    if (playbackContextRef.current) {
+      playbackContextRef.current.close().catch(() => {});
+      playbackContextRef.current = null;
     }
     if (wsRef.current) {
-      wsRef.current.close();
+      const ws = wsRef.current;
       wsRef.current = null;
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
     }
-    playbackQueueRef.current = [];
-    isPlayingRef.current = false;
-    // Don't reset connectingRef — it prevents StrictMode double-connect
+    streamingAudioRef.current = false;
   }
 
   useEffect(() => {
     connect();
     return () => cleanup();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connect]);
 
-  function handleClose() {
+  async function handleClose() {
+    try {
+      await saveMessages(messagesRef.current);
+    } catch {
+      // The modal can still close; the user transcript is visible locally.
+    }
     cleanup();
     onClose();
   }
 
+  const statusLabel =
+    status === "listening"
+      ? "Listening"
+      : status === "thinking"
+        ? "Thinking"
+        : status === "speaking"
+          ? "Speaking"
+          : status === "error"
+            ? "Needs attention"
+            : "Connecting";
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-zinc-900 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col" style={{ maxHeight: "80vh" }}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 dark:border-zinc-800">
-          <div className="flex items-center gap-3">
-            <div className={`w-3 h-3 rounded-full ${
-              status === "listening" ? "bg-green-500 animate-pulse" :
-              status === "speaking" ? "bg-blue-500 animate-pulse" :
-              status === "error" ? "bg-red-500" :
-              "bg-amber-500 animate-pulse"
-            }`} />
-            <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-              {status === "listening" ? "Listening..." :
-               status === "speaking" ? "Speaking..." :
-               status === "error" ? "Error" :
-               "Connecting..."}
-            </span>
-            <span className="text-xs text-zinc-400">{formatTime(elapsed)}</span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm sm:p-4">
+      <div className="flex h-[min(44rem,92dvh)] w-full max-w-xl flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800 sm:px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div
+              className={`h-3 w-3 rounded-full ${
+                status === "listening"
+                  ? "bg-emerald-500"
+                  : status === "thinking"
+                    ? "bg-amber-500"
+                    : status === "speaking"
+                      ? "bg-blue-500"
+                      : status === "error"
+                        ? "bg-red-500"
+                        : "bg-zinc-400"
+              } ${status !== "error" ? "animate-pulse" : ""}`}
+            />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                Deepgram Voice Agent
+              </div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                {statusLabel} · {formatTime(elapsed)} · GPT-5.5
+              </div>
+            </div>
           </div>
           <button
+            type="button"
             onClick={handleClose}
-            className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+            className="rounded-full p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+            aria-label="Close voice agent"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 6L6 18M6 6l12 12" />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6 6 18M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        {/* Transcript */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-3 min-h-[200px]">
-          {error && (
-            <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 rounded-lg p-3">
-              {error}
+        <div className="relative flex flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.12),transparent_36%),radial-gradient(circle_at_bottom,_rgba(16,185,129,0.12),transparent_30%)]">
+          <div className="flex flex-1 flex-col items-center justify-center px-6 py-8 text-center">
+            <div
+              className={`mb-5 flex h-28 w-28 items-center justify-center rounded-full border ${
+                status === "speaking"
+                  ? "border-blue-300 bg-blue-500/10"
+                  : status === "thinking"
+                    ? "border-amber-300 bg-amber-500/10"
+                    : "border-emerald-300 bg-emerald-500/10"
+              } shadow-[0_0_80px_rgba(59,130,246,0.25)]`}
+            >
+              <div
+                className={`h-16 w-16 rounded-full ${
+                  status === "speaking"
+                    ? "bg-blue-500"
+                    : status === "thinking"
+                      ? "bg-amber-500"
+                      : status === "error"
+                        ? "bg-red-500"
+                        : "bg-emerald-500"
+                } ${status !== "error" ? "animate-pulse" : ""}`}
+              />
             </div>
-          )}
-          {transcript.length === 0 && !error && (
-            <div className="text-sm text-zinc-400 text-center py-8">
-              Start speaking — the AI will respond in real time
-            </div>
-          )}
-          {transcript.map((t, i) => (
-            <div key={t.id || i} className={`flex ${t.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm ${
-                t.role === "user"
-                  ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900"
-                  : "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
-              }`}>
-                {t.text}
+            <p className="max-w-xs text-sm text-zinc-600 dark:text-zinc-300">
+              Talk naturally. I can use RecallMEM memory through tools, and I&apos;ll save the voice turn back into this chat.
+            </p>
+            {privateMode && (
+              <p className="mt-3 max-w-xs rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                Private mode is on: stored memory is not sent to the voice model.
+              </p>
+            )}
+          </div>
+
+          <div className="max-h-56 overflow-y-auto border-t border-zinc-200 bg-white/75 p-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/75">
+            {error && (
+              <div className="mb-3 rounded-2xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">
+                {error}
               </div>
+            )}
+            {transcript.length === 0 && !error && (
+              <div className="py-4 text-center text-sm text-zinc-400">
+                The live transcript will appear here.
+              </div>
+            )}
+            <div className="space-y-2">
+              {transcript.map((item) => (
+                <div
+                  key={item.id}
+                  className={`flex ${item.role === "user" ? "justify-end" : "justify-start"}`}
+                >
+                  <div
+                    className={`max-w-[82%] rounded-2xl px-3 py-2 text-sm ${
+                      item.role === "user"
+                        ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                        : "bg-zinc-100 text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
+                    }`}
+                  >
+                    {item.text}
+                  </div>
+                </div>
+              ))}
+              <div ref={transcriptEndRef} />
             </div>
-          ))}
-          <div ref={transcriptEndRef} />
+          </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-5 py-4 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-          <div className="text-xs text-zinc-400">
-            Powered by Grok Voice Agent · $0.05/min
+        <div className="flex items-center justify-between gap-3 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800 sm:px-5">
+          <div className="text-xs text-zinc-500 dark:text-zinc-400">
+            Nova-3 · Aura-2 Amalthea · Deepgram
           </div>
           <button
+            type="button"
             onClick={handleClose}
-            className="px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            className="rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700"
           >
-            End Call
+            End call
           </button>
         </div>
       </div>

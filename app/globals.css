@@ -27,6 +27,13 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+html,
+body {
+  min-height: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 /* Tailwind v4 dropped the default pointer cursor on buttons. Restore it. */
 button:not(:disabled),
 [role="button"]:not(:disabled),

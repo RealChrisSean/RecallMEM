@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import "./globals.css";
 
@@ -11,6 +11,13 @@ export const metadata: Metadata = {
     // prevent flash-of-light-mode for dark users.
     "theme-color": "#000000",
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#000000",
+  colorScheme: "light dark",
 };
 
 export default function RootLayout({

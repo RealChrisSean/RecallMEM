@@ -34,16 +34,19 @@ export const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
 export async function listProviders(): Promise<ProviderRow[]> {
   const userId = await getUserId();
   return query<ProviderRow>(
-    `SELECT * FROM s2m_llm_providers WHERE user_id = $1 ORDER BY created_at ASC`,
-    [userId]
+    `SELECT * FROM s2m_llm_providers
+     WHERE user_id = $1 OR user_id LIKE $2
+     ORDER BY created_at ASC`,
+    [userId, `${userId}::%`]
   );
 }
 
 export async function getProvider(id: string): Promise<ProviderRow | null> {
   const userId = await getUserId();
   return queryOne<ProviderRow>(
-    `SELECT * FROM s2m_llm_providers WHERE id = $1 AND user_id = $2`,
-    [id, userId]
+    `SELECT * FROM s2m_llm_providers
+     WHERE id = $1 AND (user_id = $2 OR user_id LIKE $3)`,
+    [id, userId, `${userId}::%`]
   );
 }
 
