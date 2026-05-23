@@ -52,6 +52,7 @@ export default function VoiceAgent({
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [micMuted, setMicMuted] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const captureContextRef = useRef<AudioContext | null>(null);
@@ -71,6 +72,7 @@ export default function VoiceAgent({
   const lastSavedLengthRef = useRef(messages.length);
   const lastConversationTextRef = useRef("");
   const itemCounterRef = useRef(0);
+  const micMutedRef = useRef(false);
 
   useEffect(() => {
     chatIdRef.current = chatId;
@@ -84,6 +86,13 @@ export default function VoiceAgent({
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcript]);
+
+  useEffect(() => {
+    micMutedRef.current = micMuted;
+    mediaStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = !micMuted;
+    });
+  }, [micMuted]);
 
   useEffect(() => {
     timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
@@ -285,6 +294,7 @@ export default function VoiceAgent({
 
     processor.onaudioprocess = (event) => {
       if (ws.readyState !== WebSocket.OPEN) return;
+      if (micMutedRef.current) return;
       const input = event.inputBuffer.getChannelData(0);
       const pcm = float32ToPcm16(
         resample(input, audioCtx.sampleRate, INPUT_SAMPLE_RATE)
@@ -338,6 +348,9 @@ export default function VoiceAgent({
         },
       });
       mediaStreamRef.current = stream;
+      stream.getAudioTracks().forEach((track) => {
+        track.enabled = !micMutedRef.current;
+      });
 
       const ws = new WebSocket(config.endpoint, [
         config.authProtocol || "bearer",
@@ -510,7 +523,11 @@ export default function VoiceAgent({
   }
 
   const statusLabel =
-    status === "listening"
+    micMuted && status !== "connecting" && status !== "error"
+      ? status === "speaking"
+        ? "Speaking · mic muted"
+        : "Mic muted"
+      : status === "listening"
       ? "Listening"
       : status === "thinking"
         ? "Thinking"
@@ -547,16 +564,49 @@ export default function VoiceAgent({
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handleClose}
-            className="rounded-full p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
-            aria-label="Close voice agent"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setMicMuted((muted) => !muted)}
+              aria-pressed={micMuted}
+              className={`rounded-full p-2 transition-colors ${
+                micMuted
+                  ? "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:hover:bg-amber-900"
+                  : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+              }`}
+              aria-label={micMuted ? "Unmute microphone" : "Mute microphone"}
+              title={micMuted ? "Unmute microphone" : "Mute microphone"}
+            >
+              {micMuted ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 2a3 3 0 0 0-3 3v5" />
+                  <path d="M15 9.34V5a3 3 0 0 0-5.68-1.33" />
+                  <path d="M19 10v2a7 7 0 0 1-.74 3.13" />
+                  <path d="M5 10v2a7 7 0 0 0 11.9 5" />
+                  <path d="M12 19v3" />
+                  <path d="M8 22h8" />
+                  <path d="m2 2 20 20" />
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <path d="M12 19v3" />
+                  <path d="M8 22h8" />
+                </svg>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="rounded-full p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+              aria-label="Close voice agent"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div className="relative flex flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.12),transparent_36%),radial-gradient(circle_at_bottom,_rgba(16,185,129,0.12),transparent_30%)]">
@@ -583,7 +633,9 @@ export default function VoiceAgent({
               />
             </div>
             <p className="max-w-xs text-sm text-zinc-600 dark:text-zinc-300">
-              Talk naturally. I can use RecallMEM memory through tools, and I&apos;ll save the voice turn back into this chat.
+              {micMuted
+                ? "Your mic is muted. The AI can keep talking, and you can unmute when you want to jump back in."
+                : "Talk naturally. I can use RecallMEM memory through tools, and I'll save the voice turn back into this chat."}
             </p>
             {privateMode && (
               <p className="mt-3 max-w-xs rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
@@ -626,8 +678,9 @@ export default function VoiceAgent({
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800 sm:px-5">
-          <div className="text-xs text-zinc-500 dark:text-zinc-400">
+          <div className="min-w-0 text-xs text-zinc-500 dark:text-zinc-400">
             Nova-3 · Aura-2 Amalthea · Deepgram
+            {micMuted && <span className="ml-2 text-amber-600 dark:text-amber-300">Mic muted</span>}
           </div>
           <button
             type="button"
