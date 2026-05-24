@@ -8,6 +8,8 @@ export const runtime = "nodejs";
 interface VoiceAgentSaveRequest {
   chatId?: string | null;
   messages?: Message[];
+  providerId?: string | null;
+  model?: string | null;
 }
 
 function cleanMessages(messages: Message[] | undefined): Message[] {
@@ -46,8 +48,8 @@ export async function POST(req: NextRequest) {
     }
 
     await updateChat(chatId, messages, {
-      model: "gpt-5.5",
-      providerId: null,
+      model: body.model?.trim() || "voice-agent",
+      providerId: body.providerId || null,
     });
 
     await generateTitleIfMissing(chatId).catch((err) =>

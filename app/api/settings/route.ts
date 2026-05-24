@@ -13,6 +13,9 @@ const ALLOWED_KEYS = new Set([
   "deepgram_api_key",
   "xai_voice_api_key",
   "voice_chat_mode",
+  "voice_agent_voice",
+  "voice_agent_speed",
+  "voice_agent_style",
   "luma_api_key",
 ]);
 

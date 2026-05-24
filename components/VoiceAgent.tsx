@@ -14,6 +14,8 @@ interface VoiceAgentProps {
   chatId: string | null;
   messages: Message[];
   privateMode: boolean;
+  providerId: string | null;
+  selectedModel: string | null;
   onSaved: (chatId: string, messages: Message[]) => void;
   onClose: () => void;
 }
@@ -23,6 +25,12 @@ interface VoiceAgentConfig {
   token: string;
   authProtocol?: "bearer" | "token";
   settings: Record<string, unknown>;
+  thinkModel?: string;
+  thinkProviderId?: string | null;
+  thinkModelLabel?: string;
+  voiceModel?: string;
+  voiceSpeed?: number;
+  voiceStyle?: string;
 }
 
 interface TranscriptItem {
@@ -45,6 +53,8 @@ export default function VoiceAgent({
   chatId,
   messages,
   privateMode,
+  providerId,
+  selectedModel,
   onSaved,
   onClose,
 }: VoiceAgentProps) {
@@ -53,6 +63,10 @@ export default function VoiceAgent({
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [micMuted, setMicMuted] = useState(false);
+  const [thinkModelLabel, setThinkModelLabel] = useState<string | null>(
+    selectedModel
+  );
+  const [voiceModelLabel, setVoiceModelLabel] = useState("Aura-2 Amalthea");
 
   const wsRef = useRef<WebSocket | null>(null);
   const captureContextRef = useRef<AudioContext | null>(null);
@@ -132,6 +146,13 @@ export default function VoiceAgent({
     return output;
   }
 
+  function formatDeepgramVoice(model: string | undefined) {
+    const name = (model || "aura-2-amalthea-en")
+      .replace(/^aura-2-/, "")
+      .replace(/-[a-z]{2}$/, "");
+    return `Aura-2 ${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+  }
+
   function stopPlayback() {
     activeSourcesRef.current.forEach((source) => {
       try {
@@ -185,6 +206,8 @@ export default function VoiceAgent({
       body: JSON.stringify({
         chatId: chatIdRef.current,
         messages: nextMessages,
+        providerId,
+        model: selectedModel,
       }),
     });
 
@@ -322,6 +345,8 @@ export default function VoiceAgent({
           chatId: chatIdRef.current,
           messages: messagesRef.current,
           privateMode,
+          providerId,
+          model: selectedModel,
         }),
       });
 
@@ -337,7 +362,15 @@ export default function VoiceAgent({
         token: rawConfig.token,
         authProtocol: rawConfig.authProtocol === "token" ? "token" : "bearer",
         settings: rawConfig.settings,
+        thinkModel: rawConfig.thinkModel,
+        thinkProviderId: rawConfig.thinkProviderId,
+        thinkModelLabel: rawConfig.thinkModelLabel,
+        voiceModel: rawConfig.voiceModel,
+        voiceSpeed: rawConfig.voiceSpeed,
+        voiceStyle: rawConfig.voiceStyle,
       };
+      setThinkModelLabel(config.thinkModelLabel || config.thinkModel || selectedModel);
+      setVoiceModelLabel(formatDeepgramVoice(config.voiceModel));
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -560,7 +593,8 @@ export default function VoiceAgent({
                 Deepgram Voice Agent
               </div>
               <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                {statusLabel} · {formatTime(elapsed)} · GPT-5.5
+                {statusLabel} · {formatTime(elapsed)}
+                {thinkModelLabel ? ` · ${thinkModelLabel}` : ""}
               </div>
             </div>
           </div>
@@ -679,7 +713,7 @@ export default function VoiceAgent({
 
         <div className="flex items-center justify-between gap-3 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800 sm:px-5">
           <div className="min-w-0 text-xs text-zinc-500 dark:text-zinc-400">
-            Nova-3 · Aura-2 Amalthea · Deepgram
+            Nova-3 · {voiceModelLabel} · Deepgram
             {micMuted && <span className="ml-2 text-amber-600 dark:text-amber-300">Mic muted</span>}
           </div>
           <button

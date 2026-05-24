@@ -9,12 +9,20 @@ const VOICES: Record<string, string[]> = {
   xai: ["eve", "ara", "rex", "sal", "leo"],
   openai: ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"],
   deepgram: [
-    "aura-2-andromeda-en", "aura-2-aurora-en", "aura-2-callista-en",
-    "aura-2-clio-en", "aura-2-draco-en", "aura-2-electra-en",
-    "aura-2-harmonia-en", "aura-2-helios-en", "aura-2-janus-en",
-    "aura-2-luna-en", "aura-2-orion-en", "aura-2-pandora-en",
-    "aura-2-selene-en", "aura-2-thalia-en", "aura-2-titan-en",
-    "aura-2-zeus-en",
+    "aura-2-amalthea-en", "aura-2-andromeda-en", "aura-2-apollo-en",
+    "aura-2-arcas-en", "aura-2-aries-en", "aura-2-asteria-en",
+    "aura-2-athena-en", "aura-2-atlas-en", "aura-2-aurora-en",
+    "aura-2-callista-en", "aura-2-cora-en", "aura-2-cordelia-en",
+    "aura-2-delia-en", "aura-2-draco-en", "aura-2-electra-en",
+    "aura-2-harmonia-en", "aura-2-helena-en", "aura-2-hera-en",
+    "aura-2-hermes-en", "aura-2-hyperion-en", "aura-2-iris-en",
+    "aura-2-janus-en", "aura-2-juno-en", "aura-2-jupiter-en",
+    "aura-2-luna-en", "aura-2-mars-en", "aura-2-minerva-en",
+    "aura-2-neptune-en", "aura-2-odysseus-en", "aura-2-ophelia-en",
+    "aura-2-orion-en", "aura-2-orpheus-en", "aura-2-pandora-en",
+    "aura-2-phoebe-en", "aura-2-pluto-en", "aura-2-saturn-en",
+    "aura-2-selene-en", "aura-2-thalia-en", "aura-2-theia-en",
+    "aura-2-vesta-en", "aura-2-zeus-en",
   ],
 };
 
@@ -22,7 +30,18 @@ const VOICES: Record<string, string[]> = {
  * GET /api/tts — returns available TTS providers + current settings
  */
 export async function GET() {
-  const [providers, xaiVoiceKey, deepgramKey, ttsProvider, ttsVoice, sttProvider, voiceChatMode] = await Promise.all([
+  const [
+    providers,
+    xaiVoiceKey,
+    deepgramKey,
+    ttsProvider,
+    ttsVoice,
+    sttProvider,
+    voiceChatMode,
+    voiceAgentVoice,
+    voiceAgentSpeed,
+    voiceAgentStyle,
+  ] = await Promise.all([
     listProviders(),
     getSetting("xai_voice_api_key"),
     getSetting("deepgram_api_key"),
@@ -30,6 +49,9 @@ export async function GET() {
     getSetting("tts_voice"),
     getSetting("stt_provider"),
     getSetting("voice_chat_mode"),
+    getSetting("voice_agent_voice"),
+    getSetting("voice_agent_speed"),
+    getSetting("voice_agent_style"),
   ]);
   const hasOpenAI = providers.some((p) => p.type === "openai" && p.api_key);
   const hasXAI = providers.some((p) => p.type === "openai-compatible" && p.api_key && p.base_url?.includes("x.ai"));
@@ -44,6 +66,9 @@ export async function GET() {
       voice: ttsVoice || null,
       sttProvider: sttProvider || (hasDeepgram ? "deepgram" : "whisper"),
       voiceChatMode: voiceChatMode || "separate",
+      voiceAgentVoice: voiceAgentVoice || "aura-2-amalthea-en",
+      voiceAgentSpeed: voiceAgentSpeed || "1",
+      voiceAgentStyle: voiceAgentStyle || "natural",
     },
   });
 }
@@ -70,8 +95,6 @@ export async function POST(req: NextRequest) {
 
   // Determine which provider to use (setting > auto-detect by cost)
   const provider = ttsProvider || (hasKey(xai) ? "xai" : hasKey(openai) ? "openai" : deepgramKey ? "deepgram" : "browser");
-
-  const charCount = text.length;
 
   // --- Deepgram ---
   if (provider === "deepgram" && deepgramKey) {

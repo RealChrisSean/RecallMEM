@@ -46,6 +46,7 @@ interface ProviderListItem {
   id: string;
   label: string;
   type: "ollama" | "anthropic" | "openai" | "openai-compatible";
+  base_url?: string | null;
   model: string;
 }
 
@@ -612,6 +613,22 @@ export default function ChatPage() {
   const isBusy = isStreaming || isGeneratingImage;
   const composerDisabled =
     composerMode === "image" ? !lumaConfigured : noChatBackend;
+  const selectedVoiceProvider = selectedProviderId
+    ? customProviders.find((p) => p.id === selectedProviderId) || null
+    : null;
+  const selectedVoiceModel = selectedProviderId
+    ? selectedProviderModel || selectedVoiceProvider?.model || null
+    : selectedModel;
+  const selectedVoiceModelKey = (selectedVoiceModel || "").toLowerCase();
+  const selectedVoiceBaseUrl = (selectedVoiceProvider?.base_url || "").toLowerCase();
+  const voiceAgentDisabledReason =
+    !selectedProviderId ||
+    selectedVoiceProvider?.type === "ollama" ||
+    selectedVoiceModelKey.includes("gemma")
+      ? "Voice Agent needs a cloud model. Local Gemma/Ollama is too slow for realtime voice, so pick a supported cloud model first."
+      : selectedVoiceModelKey.includes("grok") || selectedVoiceBaseUrl.includes("x.ai")
+        ? "Deepgram Voice Agent does not support xAI/Grok as the realtime think model yet. Pick GPT, Claude, Gemini, Groq, or Cerebras for voice."
+        : null;
   const latestGeneratedImage = getLatestCompletedGeneratedImage(messages);
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const chatIdRef = useRef<string | null>(null);
@@ -2224,11 +2241,22 @@ export default function ChatPage() {
             {composerMode === "chat" && (
               <button
                 type="button"
-                onClick={() => setShowVoiceAgent(true)}
+                onClick={() => {
+                  if (voiceAgentDisabledReason) {
+                    setUploadError(voiceAgentDisabledReason);
+                    return;
+                  }
+                  setUploadError(null);
+                  setShowVoiceAgent(true);
+                }}
                 disabled={isBusy}
-                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-30 dark:text-zinc-400 dark:hover:bg-emerald-950 dark:hover:text-emerald-300"
-                title="Start Voice Agent"
-                aria-label="Start Voice Agent"
+                className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
+                  voiceAgentDisabledReason
+                    ? "text-amber-500 hover:bg-amber-50 hover:text-amber-600 dark:text-amber-400 dark:hover:bg-amber-950 dark:hover:text-amber-300"
+                    : "text-zinc-500 hover:bg-emerald-50 hover:text-emerald-600 dark:text-zinc-400 dark:hover:bg-emerald-950 dark:hover:text-emerald-300"
+                }`}
+                title={voiceAgentDisabledReason || "Start Voice Agent"}
+                aria-label={voiceAgentDisabledReason || "Start Voice Agent"}
               >
                 <VoiceAgentIcon />
               </button>
@@ -2406,6 +2434,8 @@ export default function ChatPage() {
           chatId={chatId}
           messages={messages}
           privateMode={privateMode}
+          providerId={selectedProviderId}
+          selectedModel={selectedVoiceModel}
           onSaved={(savedChatId, savedMessages) => {
             setChatId(savedChatId);
             chatIdRef.current = savedChatId;

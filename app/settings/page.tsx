@@ -6,6 +6,20 @@ import { AppFooter } from "@/components/AppFooter";
 import { Logo } from "@/components/Logo";
 import { MODEL_OPTIONS } from "@/lib/llm-config";
 
+const VOICE_AGENT_STYLES = [
+  { value: "natural", label: "Natural conversation" },
+  { value: "concise", label: "Concise" },
+  { value: "coach", label: "Coach" },
+  { value: "storytelling", label: "Storytelling" },
+  { value: "calm", label: "Calm" },
+  { value: "energetic", label: "Energetic" },
+];
+
+function formatDeepgramVoiceName(model: string) {
+  const name = model.replace(/^aura-2-/, "").replace(/-[a-z]{2}$/, "");
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
 export default function SettingsPage() {
   const [connectingService, setConnectingService] = useState<string | null>(null);
   const [updateInfo, setUpdateInfo] = useState<{
@@ -66,17 +80,23 @@ export default function SettingsPage() {
   const [xaiVoiceKey, setXaiVoiceKey] = useState("");
   const [xaiVoiceConfigured, setXaiVoiceConfigured] = useState(false);
   const [voiceChatMode, setVoiceChatMode] = useState("separate");
+  const [voiceAgentVoice, setVoiceAgentVoice] = useState("aura-2-amalthea-en");
+  const [voiceAgentSpeed, setVoiceAgentSpeed] = useState("1");
+  const [voiceAgentStyle, setVoiceAgentStyle] = useState("natural");
 
   useEffect(() => {
     fetch("/api/tts")
       .then((r) => r.json())
-      .then((d: { available: { xai: boolean; openai: boolean; deepgram: boolean; browser: boolean }; voices: Record<string, string[]>; settings: { provider: string; voice: string | null; sttProvider: string; voiceChatMode?: string } }) => {
+      .then((d: { available: { xai: boolean; openai: boolean; deepgram: boolean; browser: boolean }; voices: Record<string, string[]>; settings: { provider: string; voice: string | null; sttProvider: string; voiceChatMode?: string; voiceAgentVoice?: string; voiceAgentSpeed?: string; voiceAgentStyle?: string } }) => {
         setTtsAvailable(d.available);
         setTtsVoices(d.voices);
         setTtsProvider(d.settings.provider || "auto");
         setTtsVoice(d.settings.voice || "");
         setSttProvider(d.settings.sttProvider || "whisper");
         setVoiceChatMode(d.settings.voiceChatMode || "separate");
+        setVoiceAgentVoice(d.settings.voiceAgentVoice || "aura-2-amalthea-en");
+        setVoiceAgentSpeed(d.settings.voiceAgentSpeed || "1");
+        setVoiceAgentStyle(d.settings.voiceAgentStyle || "natural");
         setDeepgramConfigured(d.available.deepgram);
         // Check xAI voice key separately
         fetch("/api/settings?key=xai_voice_api_key").then(r => r.json()).then((s: { configured?: boolean }) => setXaiVoiceConfigured(!!s.configured)).catch(() => {});
@@ -128,6 +148,21 @@ export default function SettingsPage() {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key: "voice_chat_mode", value: voiceChatMode }),
+    });
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "voice_agent_voice", value: voiceAgentVoice }),
+    });
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "voice_agent_speed", value: voiceAgentSpeed }),
+    });
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "voice_agent_style", value: voiceAgentStyle }),
     });
     setTtsSaved(true);
     setTimeout(() => setTtsSaved(false), 2000);
@@ -857,6 +892,71 @@ export default function SettingsPage() {
                   <option value="whisper">Local Whisper (free, private, requires whisper-server)</option>
                   <option value="deepgram" disabled={!ttsAvailable.deepgram}>Deepgram Nova-3 ($0.0043/min){!ttsAvailable.deepgram ? " -- add API key above" : ""}</option>
                 </select>
+              </div>
+            </div>
+
+            <hr className="border-zinc-200 dark:border-zinc-800" />
+
+            {/* Voice Agent */}
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3">Voice Agent</h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
+                These settings control the live Deepgram Voice Agent, not the speaker icon on normal chat messages.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+                    Deepgram voice
+                  </label>
+                  <select
+                    value={voiceAgentVoice}
+                    onChange={(e) => setVoiceAgentVoice(e.target.value)}
+                    disabled={!ttsAvailable.deepgram}
+                    className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 disabled:opacity-50"
+                  >
+                    {ttsVoices.deepgram?.map((voice) => (
+                      <option key={voice} value={voice}>
+                        {formatDeepgramVoiceName(voice)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+                    Speed
+                  </label>
+                  <select
+                    value={voiceAgentSpeed}
+                    onChange={(e) => setVoiceAgentSpeed(e.target.value)}
+                    disabled={!ttsAvailable.deepgram}
+                    className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 disabled:opacity-50"
+                  >
+                    <option value="0.85">Slower</option>
+                    <option value="1">Normal</option>
+                    <option value="1.15">Faster</option>
+                    <option value="1.3">Very fast</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-3">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+                    Speaking style
+                  </label>
+                  <select
+                    value={voiceAgentStyle}
+                    onChange={(e) => setVoiceAgentStyle(e.target.value)}
+                    disabled={!ttsAvailable.deepgram}
+                    className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 disabled:opacity-50"
+                  >
+                    {VOICE_AGENT_STYLES.map((style) => (
+                      <option key={style.value} value={style.value}>
+                        {style.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-500">
+                    Deepgram controls the voice model and speed. Style is added to the agent prompt so the LLM writes speech with the right tone and pacing.
+                  </p>
+                </div>
               </div>
             </div>
 
