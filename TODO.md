@@ -4,6 +4,26 @@ What's done, what's planned. Updated as of v0.1 prep.
 
 ---
 
+## Memory reliability roadmap
+
+Top priority items before we make bigger memory changes:
+
+- [x] **Evidence-backed extraction.** Require each candidate fact to include a `supporting_quote` or `source_message_index`, then only store it if TypeScript verifies the evidence exists in the transcript.
+- [x] **Hybrid retrieval.** Combine pgvector semantic search with Postgres full-text search so exact names, project titles, numbers, and weird phrases are not missed.
+- [x] **Temporal grounding.** Convert "today", "next week", "last month", and similar relative dates into concrete dates based on the conversation timestamp.
+- [ ] **Stronger supersession links.** When a new fact replaces an old one, link the old fact to the replacement fact instead of only marking the old one inactive.
+- [ ] **Memory eval suite.** Create test transcripts with expected facts and retrieval results so prompt/retrieval changes do not silently regress memory quality.
+
+Additional memory improvements:
+
+- [ ] **Entity memory.** Extract and link people, companies, projects, locations, products, and recurring topics so related memories can be found even when wording changes.
+- [ ] **Confidence and provenance.** Store where each fact came from, when it was observed, what quote supported it, and optionally a confidence score.
+- [ ] **Memory review UI.** Show "new memories learned from this chat" and let the user approve, edit, pin, or reject them.
+- [ ] **Assistant-action memories.** Selectively remember useful plans, recommendations, and decisions the assistant helped create, not just facts directly stated by the user.
+- [ ] **Retrieval scoring transparency.** Show why a memory was used, such as exact keyword match, semantic similarity, or matched entity.
+
+---
+
 ## v0.1 (current, not shipped yet)
 
 Things to do before the public launch.
@@ -41,7 +61,7 @@ The features that I want next but didn't make v0.1.
 - [ ] **Docker Compose for Postgres + Next.js** (Option A from the design discussion). One `docker compose up` removes the Postgres + pgvector install pain. Ollama still runs on host so Mac users keep Metal acceleration. Skip the all-in-one container approach because containerized Ollama on Mac loses GPU and drops generation from ~30 tok/s to ~5-8 tok/s, which defeats the entire local-LLM use case.
 
 ### External databases
-- [ ] **Connect to external Postgres-compatible databases** (Lakebase, Neon, Supabase, CockroachDB, Yugabyte, etc). Settings page field where the user pastes a connection string. Test connection button. Migrations run against the remote DB. The `configureDb({ pool })` architecture already supports swapping the pool — the missing piece is a UI for it and hot-reloading the pool at runtime without restarting the server.
+- [ ] **Connect to external Postgres-compatible databases** (Lakebase, Neon, Supabase, CockroachDB, Yugabyte, etc). Settings page field where the user pastes a connection string. Test connection button. Migrations run against the remote DB. The `configureDb({ pool })` architecture already supports swapping the pool. The missing piece is a UI for it and hot-reloading the pool at runtime without restarting the server.
 
 ## v0.3 (later)
 

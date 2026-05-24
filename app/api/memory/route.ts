@@ -21,6 +21,8 @@ export async function GET() {
           fact_text: f.fact_text,
           category: f.category,
           source_chat_id: f.source_chat_id,
+          supporting_quote: f.supporting_quote,
+          source_message_index: f.source_message_index,
           created_at: f.created_at,
         })),
         totalFacts: facts.length,

@@ -30,9 +30,13 @@ export async function buildMemoryAwareSystemPrompt(
       );
       const results = await Promise.race([searchPromise, timeoutPromise]);
       recallChunks = results
-        .filter((r) => r.distance < 0.6)
+        .filter(
+          (r) =>
+            r.match_reason !== "semantic" ||
+            (r.distance !== null && r.distance < 0.6)
+        )
         .map((r) => ({ text: r.chunk_text, date: r.chat_created_at }));
-    } catch (err) {
+    } catch {
       console.warn("[memory] vector search timed out, continuing without recalled chunks");
     }
   }

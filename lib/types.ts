@@ -27,6 +27,8 @@ export interface UserFactRow {
   source_chat_id: string | null;
   is_active: boolean;
   superseded_by: string | null;
+  supporting_quote: string | null;
+  source_message_index: number | null;
   created_at: Date;
   valid_from: Date;
   valid_to: Date | null;

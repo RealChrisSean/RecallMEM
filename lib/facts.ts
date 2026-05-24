@@ -1,6 +1,7 @@
 import { query, queryOne, getUserId, toVectorString } from "@/lib/db";
-import { embedWithSource, getEmbeddingSource } from "@/lib/embeddings";
+import { embedWithSource } from "@/lib/embeddings";
 import { chat as llmChat, FAST_MODEL } from "@/lib/llm";
+import { sqlLikePattern, type MemoryMatchReason } from "@/lib/search";
 import type { UserFactRow } from "@/lib/types";
 
 export const FACT_CATEGORIES = [
@@ -17,6 +18,37 @@ export const FACT_CATEGORIES = [
 ] as const;
 
 export type FactCategory = (typeof FACT_CATEGORIES)[number];
+
+export interface ExtractedFactCandidate {
+  text: string;
+  supportingQuote: string;
+  sourceMessageIndex?: number | null;
+}
+
+type FactInput = string | ExtractedFactCandidate;
+export type FactSearchResult = UserFactRow & {
+  distance: number | null;
+  text_rank: number | null;
+  match_reason: MemoryMatchReason;
+};
+
+const MIN_SUPPORTING_QUOTE_LENGTH = 8;
+
+const RELATIVE_TIME_PATTERNS = [
+  /\b(today|tonight|yesterday|tomorrow|overnight)\b/i,
+  /\b(this|next|last)\s+(morning|afternoon|evening|night|week|weekend|month|quarter|year)\b/i,
+  /\b(this|next|last)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i,
+  /\b(?:in|within)\s+(?:about\s+|around\s+|roughly\s+|approximately\s+|approx\.?\s+)?(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(day|days|week|weeks|month|months|year|years)\b/i,
+  /\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(day|days|week|weeks|month|months|year|years)\s+(ago|later|from now)\b/i,
+  /\b(as of now|right now|currently|recently|soon|atm|now)\b/i,
+];
+
+const CONCRETE_DATE_PATTERNS = [
+  /\b(?:19|20)\d{2}-\d{1,2}(?:-\d{1,2})?\b/,
+  /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2},?\s+(?:19|20)\d{2}\b/i,
+  /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(?:19|20)\d{2}\b/i,
+  /\b(?:q[1-4]|quarter\s+[1-4])\s+(?:19|20)\d{2}\b/i,
+];
 
 // Word-boundary keyword match. For single-word keywords we ALSO check
 // inflected forms (work/works/worked/working) so past-tense and progressive
@@ -144,12 +176,104 @@ function isGarbage(fact: string): boolean {
   return GARBAGE_PATTERNS.some((p) => p.test(fact)) || fact.length < 10;
 }
 
+export function hasRelativeTime(text: string): boolean {
+  return RELATIVE_TIME_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+export function hasConcreteDate(text: string): boolean {
+  return CONCRETE_DATE_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+export function hasUngroundedRelativeTime(text: string): boolean {
+  return hasRelativeTime(text) && !hasConcreteDate(text);
+}
+
+function normalizeEvidenceText(text: string): string {
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+export function quoteAppearsInTranscript(quote: string, transcript: string): boolean {
+  const normalizedQuote = normalizeEvidenceText(quote);
+  if (normalizedQuote.length < MIN_SUPPORTING_QUOTE_LENGTH) return false;
+  return normalizeEvidenceText(transcript).includes(normalizedQuote);
+}
+
+function parseCandidateFact(raw: unknown): ExtractedFactCandidate | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const candidate = raw as {
+    text?: unknown;
+    fact?: unknown;
+    quote?: unknown;
+    supporting_quote?: unknown;
+    source_message_index?: unknown;
+    sourceMessageIndex?: unknown;
+  };
+  const text = typeof candidate.text === "string"
+    ? candidate.text.trim()
+    : typeof candidate.fact === "string"
+      ? candidate.fact.trim()
+      : "";
+  const supportingQuote = typeof candidate.quote === "string"
+    ? candidate.quote.trim()
+    : typeof candidate.supporting_quote === "string"
+      ? candidate.supporting_quote.trim()
+      : "";
+  const sourceMessageIndex = typeof candidate.source_message_index === "number"
+    ? candidate.source_message_index
+    : typeof candidate.sourceMessageIndex === "number"
+      ? candidate.sourceMessageIndex
+    : null;
+
+  if (!text || !supportingQuote) return null;
+  return { text, supportingQuote, sourceMessageIndex };
+}
+
+export function validateExtractedFactCandidates(
+  rawFacts: unknown,
+  transcript: string
+): ExtractedFactCandidate[] {
+  if (!Array.isArray(rawFacts)) return [];
+
+  return rawFacts
+    .map(parseCandidateFact)
+    .filter((fact): fact is ExtractedFactCandidate => Boolean(fact))
+    .map((fact) => ({
+      ...fact,
+      text: fact.text.trim(),
+      supportingQuote: fact.supportingQuote.trim(),
+    }))
+    .filter((fact) => !isGarbage(fact.text))
+    .filter((fact) => !hasUngroundedRelativeTime(fact.text))
+    .filter((fact) => quoteAppearsInTranscript(fact.supportingQuote, transcript));
+}
+
+function normalizeFactInput(fact: FactInput): ExtractedFactCandidate {
+  if (typeof fact === "string") {
+    return { text: fact.trim(), supportingQuote: "" };
+  }
+  return {
+    text: fact.text.trim(),
+    supportingQuote: fact.supportingQuote.trim(),
+    sourceMessageIndex: fact.sourceMessageIndex ?? null,
+  };
+}
+
 // Optional model + provider for extraction calls. Lets the caller use
 // the same LLM the user is actually chatting with (cloud or local)
 // instead of the hardcoded FAST_MODEL.
 export interface ExtractionLLMOptions {
   model?: string;
   providerId?: string;
+  conversationDate?: Date | string;
+}
+
+function formatConversationDate(date: Date | string | undefined): string {
+  if (!date) return new Date().toISOString().slice(0, 10);
+  if (date instanceof Date) return date.toISOString().slice(0, 10);
+  const parsed = new Date(date);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return date.slice(0, 10);
 }
 
 // Extract facts from a conversation transcript using the LLM
@@ -227,7 +351,7 @@ Return the JSON array now:`;
 export async function extractFactsWithSupersession(
   transcript: string,
   llmOpts: ExtractionLLMOptions = {}
-): Promise<{ facts: string[]; supersedes: string[] }> {
+): Promise<{ facts: ExtractedFactCandidate[]; supersedes: string[] }> {
   if (!transcript || transcript.length < 100) return { facts: [], supersedes: [] };
 
   // Pull current active facts so the LLM can compare against them. We pass
@@ -244,15 +368,26 @@ export async function extractFactsWithSupersession(
     ? "(none)"
     : active.map((f) => `${f.id} :: ${f.fact_text}`).join("\n");
 
+  const conversationDate = formatConversationDate(llmOpts.conversationDate);
+
   const prompt = `You are maintaining a long-term memory of facts about the USER. You see (1) the existing active facts and (2) a new conversation transcript. Your job: extract NEW facts to add, AND identify which EXISTING facts the new conversation contradicts or replaces.
+
+CONVERSATION DATE:
+${conversationDate}
 
 EXTRACT new facts that are durable and personal:
 - Identity, family, work, health, interests, goals, opinions, projects
 - Each fact: 8-25 words, third person ("User's wife is Sarah", not "My wife is Sarah")
+- Each fact MUST include a short exact quote from the transcript that supports it
+- If a fact is based on relative time ("today", "yesterday", "next week", "in 1 month"), resolve it using the conversation date
+- The fact text must not contain unanchored relative time like "soon", "currently", "next week", or "in 1 month" unless it also includes a concrete date
 
 DO NOT extract:
 - Generic conversation observations or AI behavior notes
 - Temporary moods, speculation, things not directly stated by the user
+- Anything without a direct supporting quote from the transcript
+- Anything time-sensitive where you cannot anchor the timing to a concrete date
+- No quote, no memory
 
 SUPERSEDE existing facts when the new conversation makes them no longer true:
 - "User works at Acme" + "User left Acme to start a new job" → supersede the first
@@ -261,7 +396,12 @@ SUPERSEDE existing facts when the new conversation makes them no longer true:
 - Be conservative: only mark a fact superseded if the new information clearly replaces it. If both can still be true (e.g. "User likes coffee" + "User likes tea"), do NOT supersede.
 
 Return ONLY this JSON object, no commentary, no code blocks:
-{"facts": ["new fact 1", "new fact 2"], "supersedes": ["uuid-of-old-fact"]}
+{"facts": [{"text": "User lives in Los Angeles", "quote": "I live in Los Angeles"}], "supersedes": ["uuid-of-old-fact"]}
+
+The quote must be copied from the transcript. If the quote is missing or changed, the app will reject the fact.
+For relative time, keep the quote exact but ground the fact text:
+- Bad text: "User's job starts in 1 month"
+- Good text if the conversation date is 2026-05-23: "User said on 2026-05-23 that their job starts around 2026-06-23"
 
 EXISTING ACTIVE FACTS:
 ${existingBlock}
@@ -283,12 +423,7 @@ Return the JSON object now:`;
     const match = cleaned.match(/\{[\s\S]*\}/);
     if (!match) return { facts: [], supersedes: [] };
     const parsed = JSON.parse(match[0]) as { facts?: unknown; supersedes?: unknown };
-    const facts = Array.isArray(parsed.facts)
-      ? parsed.facts
-          .filter((f): f is string => typeof f === "string")
-          .map((f) => f.trim())
-          .filter((f) => !isGarbage(f))
-      : [];
+    const facts = validateExtractedFactCandidates(parsed.facts, transcript);
     const supersedes = Array.isArray(parsed.supersedes)
       ? parsed.supersedes
           .filter((id): id is string => typeof id === "string")
@@ -323,8 +458,8 @@ export async function markFactsSuperseded(
 
 // Store extracted facts, deduplicating against existing facts
 export async function storeFacts(
-  facts: string[],
-  sourceChatId: string
+  facts: FactInput[],
+  sourceChatId: string | null
 ): Promise<number> {
   if (facts.length === 0) return 0;
   const userId = await getUserId();
@@ -337,23 +472,42 @@ export async function storeFacts(
   const existingSet = new Set(existing.map((r) => r.fact_text.toLowerCase().trim()));
 
   let inserted = 0;
-  for (const fact of facts) {
-    const normalized = fact.toLowerCase().trim();
+  for (const rawFact of facts) {
+    const fact = normalizeFactInput(rawFact);
+    if (!fact.text || isGarbage(fact.text)) continue;
+    const normalized = fact.text.toLowerCase().trim();
     if (existingSet.has(normalized)) continue;
-    const category = categorize(fact);
+    const category = categorize(fact.text);
     // Generate embedding for vector search (fire-and-forget if it fails)
     let embeddingStr: string | null = null;
     let embCol = "embedding";
     try {
-      const result = await embedWithSource(fact);
+      const result = await embedWithSource(fact.text);
       embeddingStr = toVectorString(result.vector);
       embCol = result.source === "openai" ? "embedding_oai" : "embedding";
     } catch { /* non-critical */ }
 
     await query(
-      `INSERT INTO s2m_user_facts (user_id, fact_text, category, source_chat_id, is_active, ${embCol})
-       VALUES ($1, $2, $3, $4, TRUE, $5::vector)`,
-      [userId, fact, category, sourceChatId, embeddingStr]
+      `INSERT INTO s2m_user_facts (
+         user_id,
+         fact_text,
+         category,
+         source_chat_id,
+         is_active,
+         supporting_quote,
+         source_message_index,
+         ${embCol}
+       )
+       VALUES ($1, $2, $3, $4, TRUE, $5, $6, $7::vector)`,
+      [
+        userId,
+        fact.text,
+        category,
+        sourceChatId,
+        fact.supportingQuote || null,
+        fact.sourceMessageIndex ?? null,
+        embeddingStr,
+      ]
     );
     existingSet.add(normalized);
     inserted++;
@@ -377,20 +531,77 @@ export async function getActiveFacts(limit = 200): Promise<UserFactRow[]> {
 export async function searchFacts(
   queryText: string,
   limit = 30
-): Promise<(UserFactRow & { distance: number })[]> {
-  const userId = await getUserId();
-  const result = await embedWithSource(queryText);
-  const col = result.source === "openai" ? "embedding_oai" : "embedding";
-  const vector = toVectorString(result.vector);
+): Promise<FactSearchResult[]> {
+  const needle = queryText.trim();
+  if (!needle) return [];
 
-  return query<UserFactRow & { distance: number }>(
-    `SELECT *, ${col} <=> $1::vector AS distance
-     FROM s2m_user_facts
-     WHERE user_id = $2 AND is_active = TRUE AND ${col} IS NOT NULL
-     ORDER BY distance ASC
-     LIMIT $3`,
-    [vector, userId, limit]
+  const userId = await getUserId();
+  const like = sqlLikePattern(needle);
+
+  const keywordRows = await query<FactSearchResult>(
+    `WITH needle AS (
+       SELECT websearch_to_tsquery('simple', $2) AS query
+     )
+     SELECT f.*,
+            NULL::double precision AS distance,
+            ts_rank_cd(
+              to_tsvector('simple', coalesce(f.fact_text, '') || ' ' || coalesce(f.supporting_quote, '')),
+              needle.query
+            ) AS text_rank,
+            CASE
+              WHEN f.supporting_quote ILIKE $3 ESCAPE '\\' THEN 'receipt'
+              ELSE 'keyword'
+            END AS match_reason
+     FROM s2m_user_facts f, needle
+     WHERE f.user_id = $1
+       AND f.is_active = TRUE
+       AND (
+         to_tsvector('simple', coalesce(f.fact_text, '') || ' ' || coalesce(f.supporting_quote, '')) @@ needle.query
+         OR f.fact_text ILIKE $3 ESCAPE '\\'
+         OR f.supporting_quote ILIKE $3 ESCAPE '\\'
+       )
+     ORDER BY
+       CASE
+         WHEN f.fact_text ILIKE $3 ESCAPE '\\' THEN 0
+         WHEN f.supporting_quote ILIKE $3 ESCAPE '\\' THEN 1
+         ELSE 2
+       END,
+       text_rank DESC,
+       f.created_at DESC
+     LIMIT $4`,
+    [userId, needle, like, limit]
   );
+
+  let semanticRows: FactSearchResult[] = [];
+  try {
+    const result = await embedWithSource(needle);
+    const col = result.source === "openai" ? "embedding_oai" : "embedding";
+    const vector = toVectorString(result.vector);
+
+    semanticRows = await query<FactSearchResult>(
+      `SELECT *,
+              ${col} <=> $1::vector AS distance,
+              NULL::real AS text_rank,
+              'semantic' AS match_reason
+       FROM s2m_user_facts
+       WHERE user_id = $2 AND is_active = TRUE AND ${col} IS NOT NULL
+       ORDER BY distance ASC
+       LIMIT $3`,
+      [vector, userId, limit]
+    );
+  } catch (err) {
+    console.warn("[facts] semantic fact search failed, using keyword matches only", err);
+  }
+
+  const merged: FactSearchResult[] = [];
+  const seen = new Set<string>();
+  for (const row of [...keywordRows, ...semanticRows]) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    merged.push(row);
+    if (merged.length >= limit) break;
+  }
+  return merged;
 }
 
 // Get identity/relationship facts that should always be included
@@ -432,8 +643,15 @@ export async function getSmartFacts(
   if (queryText && queryText.length > 5) {
     try {
       const relevant = await searchFacts(queryText, 50);
-      // Only include facts with reasonable similarity
-      add(relevant.filter((f) => f.distance < 0.65));
+      // Keyword/receipt hits are exact enough to keep. Semantic hits still
+      // need a distance threshold so vaguely related facts do not flood memory.
+      add(
+        relevant.filter(
+          (f) =>
+            f.match_reason !== "semantic" ||
+            (f.distance !== null && f.distance < 0.65)
+        )
+      );
     } catch (err) {
       console.error("[facts] vector search failed:", err);
     }

@@ -11,21 +11,36 @@ export const runtime = "nodejs";
  */
 export async function POST(req: NextRequest) {
   const { query } = (await req.json()) as { query: string };
-  if (!query) return Response.json({ results: [] });
+  const queryText = typeof query === "string" ? query.trim() : "";
+  if (!queryText) return Response.json({ facts: [], conversations: [] });
 
   // Run fact search and chunk search in parallel
   const [relevantFacts, relevantChunks] = await Promise.all([
-    searchFacts(query, 15).catch(() => []),
-    searchChunks(query, null, 5).catch(() => []),
+    searchFacts(queryText, 15).catch(() => []),
+    searchChunks(queryText, null, 5).catch(() => []),
   ]);
 
   const facts = relevantFacts
-    .filter((f) => f.distance < 0.65)
-    .map((f) => `[${(f.valid_from || f.created_at).toISOString().slice(0, 10)}] ${f.fact_text}`);
+    .filter(
+      (f) =>
+        f.match_reason !== "semantic" ||
+        (f.distance !== null && f.distance < 0.65)
+    )
+    .map((f) => {
+      const reason = f.match_reason === "receipt" ? "receipt match" : `${f.match_reason} match`;
+      return `[${(f.valid_from || f.created_at).toISOString().slice(0, 10)}; ${reason}] ${f.fact_text}`;
+    });
 
   const chunks = relevantChunks
-    .filter((c) => c.distance < 0.6)
-    .map((c) => `[from ${c.chat_created_at.toISOString().slice(0, 10)}] ${c.chunk_text}`);
+    .filter(
+      (c) =>
+        c.match_reason !== "semantic" ||
+        (c.distance !== null && c.distance < 0.6)
+    )
+    .map(
+      (c) =>
+        `[from ${c.chat_created_at.toISOString().slice(0, 10)}; ${c.match_reason} match] ${c.chunk_text}`
+    );
 
   return Response.json({
     facts,

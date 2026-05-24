@@ -1,4 +1,4 @@
-import { chat as llmChat, FAST_MODEL, getCheapestLLM } from "@/lib/llm";
+import { chat as llmChat, getCheapestLLM } from "@/lib/llm";
 import { setChatTitle, getChat } from "@/lib/chats";
 import {
   extractFactsWithSupersession,
@@ -38,7 +38,7 @@ export async function runPostChatPipeline(chatId: string): Promise<void> {
         const cheapLLM = await getCheapestLLM();
         const { facts, supersedes } = await extractFactsWithSupersession(
           chatRow.transcript,
-          cheapLLM
+          { ...cheapLLM, conversationDate: chatRow.updated_at || chatRow.created_at }
         );
         const retired = await markFactsSuperseded(supersedes, chatId);
         const inserted = facts.length > 0 ? await storeFacts(facts, chatId) : 0;
@@ -79,6 +79,7 @@ export async function extractFactsLive(
   chatId: string,
   _llmOpts: { model?: string; providerId?: string } = {}
 ): Promise<void> {
+  void _llmOpts;
   const langfuse = getLangfuse();
   const trace = langfuse?.trace({
     name: "live-fact-extraction",
@@ -126,7 +127,7 @@ export async function extractFactsLive(
     const cheapLLM = await getCheapestLLM();
     const { facts, supersedes } = await extractFactsWithSupersession(
       latestExchange,
-      cheapLLM
+      { ...cheapLLM, conversationDate: chatRow.updated_at || chatRow.created_at }
     );
     extractSpan?.end({ output: { facts, supersedes } });
 
@@ -167,6 +168,7 @@ export async function generateTitleIfMissing(
   chatId: string,
   _opts: { providerId?: string } = {}
 ): Promise<void> {
+  void _opts;
   try {
     const chatRow = await getChat(chatId);
     if (!chatRow || !chatRow.transcript) return;

@@ -1,5 +1,15 @@
 import { query, toVectorString, getUserId } from "@/lib/db";
 import { embedWithSource, embedBatchWithSource, embeddingColumnForSource } from "@/lib/embeddings";
+import { sqlLikePattern, type MemoryMatchReason } from "@/lib/search";
+
+export type ChunkSearchResult = {
+  chunk_text: string;
+  distance: number | null;
+  text_rank: number | null;
+  match_reason: MemoryMatchReason;
+  chat_id: string;
+  chat_created_at: Date;
+};
 
 // Split a transcript into ~1000 char chunks at sentence/message boundaries
 export function chunkTranscript(transcript: string, maxChars = 1000): string[] {
@@ -93,33 +103,90 @@ export async function searchChunks(
   queryText: string,
   excludeChatId: string | null = null,
   limit = 5
-): Promise<{ chunk_text: string; distance: number; chat_id: string; chat_created_at: Date }[]> {
-  const userId = await getUserId();
-  const result = await embedWithSource(queryText);
-  const col = embeddingColumnForSource(result.source);
-  const vector = toVectorString(result.vector);
+): Promise<ChunkSearchResult[]> {
+  const needle = queryText.trim();
+  if (!needle) return [];
 
-  if (excludeChatId) {
-    return query(
-      `SELECT c.chunk_text, c.chat_id, ch.created_at AS chat_created_at,
-              c.${col} <=> $1::vector AS distance
+  const userId = await getUserId();
+  const like = sqlLikePattern(needle);
+
+  const excludeSql = excludeChatId ? "AND c.chat_id != $5" : "";
+  const keywordParams = excludeChatId
+    ? [userId, needle, like, limit, excludeChatId]
+    : [userId, needle, like, limit];
+
+  const keywordRows = await query<ChunkSearchResult>(
+    `WITH needle AS (
+       SELECT websearch_to_tsquery('simple', $2) AS query
+     )
+     SELECT c.chunk_text,
+            c.chat_id,
+            ch.created_at AS chat_created_at,
+            NULL::double precision AS distance,
+            ts_rank_cd(to_tsvector('simple', c.chunk_text), needle.query) AS text_rank,
+            'keyword' AS match_reason
+     FROM s2m_transcript_chunks c
+     JOIN s2m_chats ch ON ch.id = c.chat_id,
+          needle
+     WHERE c.user_id = $1
+       ${excludeSql}
+       AND (
+         to_tsvector('simple', c.chunk_text) @@ needle.query
+         OR c.chunk_text ILIKE $3 ESCAPE '\\'
+       )
+     ORDER BY
+       CASE WHEN c.chunk_text ILIKE $3 ESCAPE '\\' THEN 0 ELSE 1 END,
+       text_rank DESC,
+       ch.created_at DESC
+     LIMIT $4`,
+    keywordParams
+  );
+
+  let semanticRows: ChunkSearchResult[] = [];
+  try {
+    const result = await embedWithSource(needle);
+    const col = embeddingColumnForSource(result.source);
+    const vector = toVectorString(result.vector);
+
+    if (excludeChatId) {
+      semanticRows = await query<ChunkSearchResult>(
+        `SELECT c.chunk_text, c.chat_id, ch.created_at AS chat_created_at,
+                c.${col} <=> $1::vector AS distance,
+                NULL::real AS text_rank,
+                'semantic' AS match_reason
        FROM s2m_transcript_chunks c
        JOIN s2m_chats ch ON ch.id = c.chat_id
        WHERE c.user_id = $2 AND c.chat_id != $3 AND c.${col} IS NOT NULL
        ORDER BY distance ASC
        LIMIT $4`,
-      [vector, userId, excludeChatId, limit]
-    );
+        [vector, userId, excludeChatId, limit]
+      );
+    } else {
+      semanticRows = await query<ChunkSearchResult>(
+        `SELECT c.chunk_text, c.chat_id, ch.created_at AS chat_created_at,
+                c.${col} <=> $1::vector AS distance,
+                NULL::real AS text_rank,
+                'semantic' AS match_reason
+       FROM s2m_transcript_chunks c
+       JOIN s2m_chats ch ON ch.id = c.chat_id
+       WHERE c.user_id = $2 AND c.${col} IS NOT NULL
+       ORDER BY distance ASC
+       LIMIT $3`,
+        [vector, userId, limit]
+      );
+    }
+  } catch (err) {
+    console.warn("[chunks] semantic chunk search failed, using keyword matches only", err);
   }
 
-  return query(
-    `SELECT c.chunk_text, c.chat_id, ch.created_at AS chat_created_at,
-            c.${col} <=> $1::vector AS distance
-     FROM s2m_transcript_chunks c
-     JOIN s2m_chats ch ON ch.id = c.chat_id
-     WHERE c.user_id = $2 AND c.${col} IS NOT NULL
-     ORDER BY distance ASC
-     LIMIT $3`,
-    [vector, userId, limit]
-  );
+  const merged: ChunkSearchResult[] = [];
+  const seen = new Set<string>();
+  for (const row of [...keywordRows, ...semanticRows]) {
+    const key = `${row.chat_id}:${row.chunk_text}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(row);
+    if (merged.length >= limit) break;
+  }
+  return merged;
 }
