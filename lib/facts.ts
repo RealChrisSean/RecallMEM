@@ -527,8 +527,7 @@ export async function getActiveFacts(limit = 200): Promise<UserFactRow[]> {
   );
 }
 
-// Vector search over facts — finds facts semantically relevant to the query
-export async function searchFacts(
+export async function searchFactsKeyword(
   queryText: string,
   limit = 30
 ): Promise<FactSearchResult[]> {
@@ -571,7 +570,19 @@ export async function searchFacts(
      LIMIT $4`,
     [userId, needle, like, limit]
   );
+  return keywordRows;
+}
 
+// Vector search over facts — finds facts semantically relevant to the query
+export async function searchFacts(
+  queryText: string,
+  limit = 30
+): Promise<FactSearchResult[]> {
+  const needle = queryText.trim();
+  if (!needle) return [];
+
+  const userId = await getUserId();
+  const keywordRows = await searchFactsKeyword(needle, limit);
   let semanticRows: FactSearchResult[] = [];
   try {
     const result = await embedWithSource(needle);

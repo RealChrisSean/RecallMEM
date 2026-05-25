@@ -151,6 +151,7 @@ function normalizeVoiceAgentVoice(voice: string | null) {
 }
 
 function normalizeVoiceAgentSpeed(speed: string | null) {
+  if (!speed) return DEFAULT_VOICE_AGENT_SPEED;
   const numeric = Number(speed);
   if (!Number.isFinite(numeric)) return DEFAULT_VOICE_AGENT_SPEED;
   return Math.min(1.5, Math.max(0.7, numeric));
@@ -224,7 +225,7 @@ ${profile ? `<user_profile>\n${profile}\n</user_profile>` : "This is a new user.
 
 ${facts.length > 0 ? `<important_memory>\n${facts.map((f) => `[${f.date}] ${f.text}`).join("\n")}\n</important_memory>` : ""}
 
-You also have a search_memory tool backed by RecallMEM's Postgres/pgvector database. For any substantive user turn, call search_memory with the user's latest request before answering so you can retrieve relevant facts and past conversation context. You may skip it only for tiny social turns like greetings, thanks, or "can you hear me?"
+You also have a search_memory tool backed by RecallMEM's Postgres/pgvector database. Use it when the user asks about themselves, past decisions, ongoing projects, preferences, relationships, finances, health, plans, or says something ambiguous like "that project" or "what did we decide." Skip it for greetings, quick reactions, general knowledge, and simple back-and-forth where the provided profile/facts/current conversation are enough.
 
 Never pretend to remember something that is not in the provided profile, facts, current conversation, or search_memory results. If memory is missing, ask a quick clarifying question.`;
 }

@@ -1656,10 +1656,10 @@ export default function ChatPage() {
         <div className="mx-auto max-w-3xl space-y-6 px-3 py-4 sm:px-4 sm:py-6">
           {messages.length === 0 ? (
             <div className="py-16 text-center sm:py-20">
-              <p className="text-zinc-500 dark:text-zinc-400 text-sm">
+              <p className="text-base text-zinc-500 dark:text-zinc-400 sm:text-sm">
                 Start a conversation. Everything stays on your machine.
                 <br />
-                <span className="text-zinc-400 dark:text-zinc-600 text-xs">
+                <span className="text-sm text-zinc-400 dark:text-zinc-600 sm:text-xs">
                   Cloud LLMs (Anthropic, OpenAI, etc.) only see what you send them.
                 </span>
               </p>
@@ -2808,7 +2808,7 @@ const MessageBubble = memo(function MessageBubble({ message, onSpeak }: { messag
   return (
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`relative max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+        className={`relative max-w-[92%] rounded-2xl px-4 py-3 text-base leading-7 sm:max-w-[85%] sm:text-sm sm:leading-relaxed ${
           isUser
             ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 whitespace-pre-wrap"
             : "bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100"
@@ -2829,10 +2829,10 @@ const MessageBubble = memo(function MessageBubble({ message, onSpeak }: { messag
         )}
         {thinkContent && (
           <details className="mb-3" open={thinkingInProgress}>
-            <summary className="text-xs text-amber-600 dark:text-amber-400 cursor-pointer hover:underline">
+            <summary className="text-sm text-amber-600 dark:text-amber-400 cursor-pointer hover:underline sm:text-xs">
               {thinkingInProgress ? "Thinking..." : "Thought process"}
             </summary>
-            <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400 italic whitespace-pre-wrap leading-relaxed border-l-2 border-amber-300 dark:border-amber-800 pl-3">
+            <div className="mt-2 border-l-2 border-amber-300 pl-3 text-sm italic leading-relaxed whitespace-pre-wrap text-zinc-500 dark:border-amber-800 dark:text-zinc-400 sm:text-xs">
               {thinkContent}
             </div>
           </details>
@@ -2885,7 +2885,7 @@ const MessageBubble = memo(function MessageBubble({ message, onSpeak }: { messag
         )}
         {/* Token usage pill */}
         {!isUser && message.usage && (
-          <div className="mt-2 flex items-center gap-2 text-[10px] text-zinc-400">
+          <div className="mt-2 flex items-center gap-2 text-[11px] text-zinc-400 sm:text-[10px]">
             <span className="font-mono">{message.usage.model}</span>
             <span>{message.usage.inputTokens.toLocaleString()} in / {message.usage.outputTokens.toLocaleString()} out</span>
           </div>
@@ -2897,7 +2897,7 @@ const MessageBubble = memo(function MessageBubble({ message, onSpeak }: { messag
 
 function MarkdownContent({ content }: { content: string }) {
   return (
-    <div className="prose prose-sm prose-zinc dark:prose-invert max-w-none prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none">
+    <div className="prose prose-zinc max-w-none prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none dark:prose-invert sm:prose-sm">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   );
@@ -3140,7 +3140,7 @@ function ModelPicker({
         disabled={disabled}
         className={
           isMobile
-            ? "h-10 w-full cursor-pointer appearance-none truncate rounded-xl border border-zinc-200 bg-white px-3 pr-8 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700"
+            ? "h-11 w-full cursor-pointer appearance-none truncate rounded-xl border border-zinc-200 bg-white px-3 pr-8 text-base font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700"
             : "w-[42vw] max-w-[15rem] cursor-pointer appearance-none truncate rounded-md border border-zinc-200 bg-white px-3 py-1.5 pr-8 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700 sm:w-auto sm:max-w-[22rem]"
         }
       >

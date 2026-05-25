@@ -90,6 +90,7 @@ describe("voice-agent route", () => {
     expect(body.thinkModel).toBe("gpt-5.5");
     expect(body.thinkProviderId).toBe("provider-openai");
     expect(body.thinkModelLabel).toBe("gpt-5.5 via OpenAI");
+    expect(body.voiceSpeed).toBe(1);
     expect(body.settings.agent.think.provider).toEqual({
       type: "open_ai",
       model: "gpt-5.5",
@@ -153,12 +154,29 @@ describe("voice-agent route", () => {
     expect(body.voiceModel).toBe("aura-2-athena-en");
     expect(body.voiceSpeed).toBe(0.85);
     expect(body.voiceStyle).toBe("storytelling");
+    expect(body.settings.audio).toEqual({
+      input: {
+        encoding: "linear16",
+        sample_rate: 16000,
+      },
+      output: {
+        encoding: "linear16",
+        sample_rate: 24000,
+        container: "none",
+      },
+    });
     expect(body.settings.agent.speak.provider).toEqual({
       type: "deepgram",
       model: "aura-2-athena-en",
       speed: 0.85,
     });
     expect(body.settings.agent.think.prompt).toContain("Speaking style: storytelling");
+    expect(body.settings.agent.think.prompt).toContain(
+      "Use it when the user asks about themselves"
+    );
+    expect(body.settings.agent.think.prompt).toContain(
+      "Skip it for greetings, quick reactions, general knowledge"
+    );
   });
 
   it("blocks local Gemma/Ollama because realtime voice needs a cloud model", async () => {

@@ -98,8 +98,7 @@ export async function searchChunksInChat(
   );
 }
 
-// Vector search over past transcript chunks for relevant context.
-export async function searchChunks(
+export async function searchChunksKeyword(
   queryText: string,
   excludeChatId: string | null = null,
   limit = 5
@@ -115,7 +114,7 @@ export async function searchChunks(
     ? [userId, needle, like, limit, excludeChatId]
     : [userId, needle, like, limit];
 
-  const keywordRows = await query<ChunkSearchResult>(
+  return query<ChunkSearchResult>(
     `WITH needle AS (
        SELECT websearch_to_tsquery('simple', $2) AS query
      )
@@ -141,6 +140,19 @@ export async function searchChunks(
      LIMIT $4`,
     keywordParams
   );
+}
+
+// Vector search over past transcript chunks for relevant context.
+export async function searchChunks(
+  queryText: string,
+  excludeChatId: string | null = null,
+  limit = 5
+): Promise<ChunkSearchResult[]> {
+  const needle = queryText.trim();
+  if (!needle) return [];
+
+  const userId = await getUserId();
+  const keywordRows = await searchChunksKeyword(needle, excludeChatId, limit);
 
   let semanticRows: ChunkSearchResult[] = [];
   try {

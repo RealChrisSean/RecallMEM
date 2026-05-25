@@ -2,6 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message } from "@/lib/types";
+import {
+  VOICE_CAPTURE_BUFFER_SIZE,
+  VOICE_INPUT_SAMPLE_RATE,
+  VOICE_OUTPUT_SAMPLE_RATE,
+  float32ToPcm16,
+  nextPlaybackStartTime,
+  pcm16ToFloat32,
+  resampleLinear,
+} from "@/lib/voice-audio";
 
 type VoiceStatus =
   | "connecting"
@@ -45,9 +54,6 @@ interface DeepgramFunctionCall {
   arguments?: string;
   client_side?: boolean;
 }
-
-const INPUT_SAMPLE_RATE = 16000;
-const OUTPUT_SAMPLE_RATE = 24000;
 
 export default function VoiceAgent({
   chatId,
@@ -126,26 +132,6 @@ export default function VoiceAgent({
     return `${role}-${Date.now()}-${itemCounterRef.current}`;
   }
 
-  function float32ToPcm16(float32: Float32Array): ArrayBuffer {
-    const int16 = new Int16Array(float32.length);
-    for (let i = 0; i < float32.length; i++) {
-      const sample = Math.max(-1, Math.min(1, float32[i]));
-      int16[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-    }
-    return int16.buffer;
-  }
-
-  function resample(input: Float32Array, fromRate: number, toRate: number): Float32Array {
-    if (fromRate === toRate) return input;
-    const ratio = fromRate / toRate;
-    const outputLength = Math.max(1, Math.round(input.length / ratio));
-    const output = new Float32Array(outputLength);
-    for (let i = 0; i < outputLength; i++) {
-      output[i] = input[Math.min(input.length - 1, Math.round(i * ratio))];
-    }
-    return output;
-  }
-
   function formatDeepgramVoice(model: string | undefined) {
     const name = (model || "aura-2-amalthea-en")
       .replace(/^aura-2-/, "")
@@ -169,16 +155,13 @@ export default function VoiceAgent({
     if (arrayBuffer.byteLength === 0) return;
     const ctx =
       playbackContextRef.current ||
-      new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
+      new AudioContext({ sampleRate: VOICE_OUTPUT_SAMPLE_RATE });
     playbackContextRef.current = ctx;
 
-    const int16 = new Int16Array(arrayBuffer.slice(0));
-    const float32 = new Float32Array(int16.length);
-    for (let i = 0; i < int16.length; i++) {
-      float32[i] = int16[i] / (int16[i] < 0 ? 0x8000 : 0x7fff);
-    }
+    void ctx.resume().catch(() => {});
+    const float32 = pcm16ToFloat32(arrayBuffer);
 
-    const audioBuffer = ctx.createBuffer(1, float32.length, OUTPUT_SAMPLE_RATE);
+    const audioBuffer = ctx.createBuffer(1, float32.length, VOICE_OUTPUT_SAMPLE_RATE);
     audioBuffer.getChannelData(0).set(float32);
 
     const source = ctx.createBufferSource();
@@ -188,7 +171,7 @@ export default function VoiceAgent({
       activeSourcesRef.current = activeSourcesRef.current.filter((s) => s !== source);
     };
 
-    const startAt = Math.max(ctx.currentTime + 0.02, playbackTimeRef.current || 0);
+    const startAt = nextPlaybackStartTime(ctx.currentTime, playbackTimeRef.current);
     playbackTimeRef.current = startAt + audioBuffer.duration;
     activeSourcesRef.current.push(source);
     source.start(startAt);
@@ -305,10 +288,10 @@ export default function VoiceAgent({
     if (!ws || streamingAudioRef.current) return;
     streamingAudioRef.current = true;
 
-    const audioCtx = new AudioContext({ sampleRate: INPUT_SAMPLE_RATE });
+    const audioCtx = new AudioContext({ sampleRate: VOICE_INPUT_SAMPLE_RATE });
     captureContextRef.current = audioCtx;
     const source = audioCtx.createMediaStreamSource(stream);
-    const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+    const processor = audioCtx.createScriptProcessor(VOICE_CAPTURE_BUFFER_SIZE, 1, 1);
     const silenceGain = audioCtx.createGain();
     silenceGain.gain.value = 0;
 
@@ -320,7 +303,7 @@ export default function VoiceAgent({
       if (micMutedRef.current) return;
       const input = event.inputBuffer.getChannelData(0);
       const pcm = float32ToPcm16(
-        resample(input, audioCtx.sampleRate, INPUT_SAMPLE_RATE)
+        resampleLinear(input, audioCtx.sampleRate, VOICE_INPUT_SAMPLE_RATE)
       );
       ws.send(pcm);
     };
@@ -377,7 +360,7 @@ export default function VoiceAgent({
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-          sampleRate: INPUT_SAMPLE_RATE,
+          sampleRate: VOICE_INPUT_SAMPLE_RATE,
         },
       });
       mediaStreamRef.current = stream;
