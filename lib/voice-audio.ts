@@ -2,7 +2,6 @@ export const VOICE_INPUT_SAMPLE_RATE = 16000;
 export const VOICE_OUTPUT_SAMPLE_RATE = 24000;
 export const VOICE_CAPTURE_BUFFER_SIZE = 2048;
 export const VOICE_PLAYBACK_JITTER_SECONDS = 0.08;
-export const VOICE_MAX_PLAYBACK_BACKLOG_SECONDS = 1.25;
 
 export function float32ToPcm16(float32: Float32Array): ArrayBuffer {
   const int16 = new Int16Array(float32.length);
@@ -50,11 +49,9 @@ export function resampleLinear(
 export function nextPlaybackStartTime(
   currentTime: number,
   scheduledUntil: number,
-  jitterSeconds = VOICE_PLAYBACK_JITTER_SECONDS,
-  maxBacklogSeconds = VOICE_MAX_PLAYBACK_BACKLOG_SECONDS
+  jitterSeconds = VOICE_PLAYBACK_JITTER_SECONDS
 ) {
   const target = currentTime + jitterSeconds;
   if (!scheduledUntil || scheduledUntil <= currentTime) return target;
-  if (scheduledUntil - currentTime > maxBacklogSeconds) return target;
   return Math.max(target, scheduledUntil);
 }

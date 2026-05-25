@@ -51,7 +51,7 @@ describe("voice audio helpers", () => {
     expect(nextPlaybackStartTime(10, 9.9)).toBeCloseTo(10 + VOICE_PLAYBACK_JITTER_SECONDS);
   });
 
-  it("resets playback scheduling if a stale queue would create obvious lag", () => {
-    expect(nextPlaybackStartTime(10, 12)).toBeCloseTo(10 + VOICE_PLAYBACK_JITTER_SECONDS);
+  it("never schedules new chunks on top of already queued playback", () => {
+    expect(nextPlaybackStartTime(10, 12)).toBeCloseTo(12);
   });
 });
