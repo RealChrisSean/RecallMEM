@@ -6,7 +6,6 @@ export function messagesToTranscript(messages: Message[]): string {
   return JSON.stringify(messages.map((m) => ({
     role: m.role,
     content: m.content,
-    ...(m.generatedImage ? { generatedImage: m.generatedImage } : {}),
     ...(m.usage ? { usage: m.usage } : {}),
   })));
 }

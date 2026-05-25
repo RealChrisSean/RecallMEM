@@ -18,19 +18,6 @@ const DEFAULT_MODEL: ModelId = "gemma4:26b";
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
-const LUMA_ASPECT_RATIOS = ["", "3:1", "2:1", "16:9", "3:2", "1:1", "2:3", "9:16", "1:2", "1:3"] as const;
-const LUMA_STYLES = ["auto", "manga"] as const;
-const LUMA_OUTPUT_FORMATS = ["", "png", "jpeg"] as const;
-
-type ComposerMode = "chat" | "image";
-type LumaAspectRatioOption = (typeof LUMA_ASPECT_RATIOS)[number];
-type LumaStyleOption = (typeof LUMA_STYLES)[number];
-type LumaOutputFormatOption = (typeof LUMA_OUTPUT_FORMATS)[number];
-
-interface LumaInlineImage {
-  data: string;
-  media_type: string;
-}
 
 interface ChatListItem {
   id: string;
@@ -79,13 +66,6 @@ export default function ChatPage() {
   const [dontShowWebSearchWarning, setDontShowWebSearchWarning] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [privateMode, setPrivateMode] = useState(false);
-  const [composerMode, setComposerMode] = useState<ComposerMode>("chat");
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const [lumaConfigured, setLumaConfigured] = useState(false);
-  const [lumaAspectRatio, setLumaAspectRatio] = useState<LumaAspectRatioOption>("16:9");
-  const [lumaStyle, setLumaStyle] = useState<LumaStyleOption>("auto");
-  const [lumaOutputFormat, setLumaOutputFormat] = useState<LumaOutputFormatOption>("");
-  const [lumaWebSearch, setLumaWebSearch] = useState(false);
   const [showBrainPicker, setShowBrainPicker] = useState(true);
 
   // Sync brain picker visibility from localStorage on mount.
@@ -95,13 +75,6 @@ export default function ChatPage() {
     if (localStorage.getItem("recallmem.showBrainPicker") === "false") {
       setShowBrainPicker(false);
     }
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/settings?key=luma_api_key")
-      .then((r) => r.json())
-      .then((data: { configured?: boolean }) => setLumaConfigured(!!data.configured))
-      .catch(() => setLumaConfigured(false));
   }, []);
 
   const [showBrainHint, setShowBrainHint] = useState(false);
@@ -610,9 +583,8 @@ export default function ChatPage() {
   );
   const hasCloudProvider = customProviders.some((p) => p.type !== "ollama");
   const noChatBackend = modelsLoaded && !hasGemmaInstalled && !hasCloudProvider;
-  const isBusy = isStreaming || isGeneratingImage;
-  const composerDisabled =
-    composerMode === "image" ? !lumaConfigured : noChatBackend;
+  const isBusy = isStreaming;
+  const composerDisabled = noChatBackend;
   const selectedVoiceProvider = selectedProviderId
     ? customProviders.find((p) => p.id === selectedProviderId) || null
     : null;
@@ -629,7 +601,6 @@ export default function ChatPage() {
       : selectedVoiceModelKey.includes("grok") || selectedVoiceBaseUrl.includes("x.ai")
         ? "Deepgram Voice Agent does not support xAI/Grok as the realtime think model yet. Pick GPT, Claude, Gemini, Groq, or Cerebras for voice."
         : null;
-  const latestGeneratedImage = getLatestCompletedGeneratedImage(messages);
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const chatIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1096,21 +1067,6 @@ export default function ChatPage() {
     }
   }, [input]);
 
-  // Read an image file as base64 (without the data URL prefix, just the raw base64)
-  function readImageAsBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        // Strip the "data:image/png;base64," prefix
-        const base64 = result.split(",")[1] || result;
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  }
-
   // Read an image as a data URL for preview
   function readImageAsDataURL(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -1173,11 +1129,6 @@ export default function ChatPage() {
       }
     }
 
-    if (composerMode === "image") {
-      setUploadError("Image mode only accepts image files.");
-      return null;
-    }
-
     if (lower.endsWith(".pdf")) {
       return {
         attached: { name: file.name, type: "pdf", size: file.size },
@@ -1195,10 +1146,6 @@ export default function ChatPage() {
   async function handleFiles(files: FileList | File[]) {
     setUploadError(null);
     const fileArray = Array.from(files);
-    if (composerMode === "image" && attachedFiles.length + fileArray.length > 9) {
-      setUploadError("Luma supports one source image plus up to 8 references.");
-      return;
-    }
     const results = await Promise.all(fileArray.map(processFile));
     const valid = results.filter(
       (r): r is { attached: AttachedFile; raw: File | null } => r !== null
@@ -1266,182 +1213,8 @@ export default function ChatPage() {
     setPendingRawFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function imageAttachmentToBase64(file: AttachedFile): string {
-    const dataUrl = file.content || "";
-    return dataUrl.split(",")[1] || dataUrl;
-  }
-
-  function imageAttachmentToLuma(file: AttachedFile): LumaInlineImage | null {
-    if (file.type !== "image" || !file.content) return null;
-    const match = file.content.match(/^data:([^;]+);base64,(.+)$/);
-    if (match) {
-      return { media_type: match[1], data: match[2] };
-    }
-    return { media_type: "image/jpeg", data: imageAttachmentToBase64(file) };
-  }
-
-  function getLatestCompletedGeneratedImage(sourceMessages: Message[]) {
-    for (let index = sourceMessages.length - 1; index >= 0; index--) {
-      const image = sourceMessages[index].generatedImage;
-      if (image?.status === "completed" && image.url) return image;
-    }
-    return null;
-  }
-
-  function updateGeneratedImageMessage(image: NonNullable<Message["generatedImage"]>) {
-    setMessages((prev) =>
-      prev.map((message) =>
-        message.generatedImage?.id === image.id
-          ? {
-              ...message,
-              content:
-                image.status === "failed"
-                  ? `Image generation failed: ${image.failureReason || "Unknown Luma error"}`
-                  : image.status === "completed"
-                    ? `${image.generationType === "image_edit" ? "Edited image" : "Generated image"}: ${image.prompt}`
-                    : `${image.generationType === "image_edit" ? "Editing image" : "Generating image"}: ${image.prompt}`,
-              generatedImage: image,
-            }
-          : message
-      )
-    );
-  }
-
-  async function pollLumaGeneration(id: string) {
-    const deadline = Date.now() + 180000;
-    let interval = 1000;
-
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, interval));
-      const res = await fetch(`/api/luma/generations/${encodeURIComponent(id)}`);
-      const data = (await res.json()) as {
-        image?: NonNullable<Message["generatedImage"]>;
-        error?: string;
-      };
-
-      if (!res.ok) {
-        throw new Error(data.error || `Luma polling failed: ${res.status}`);
-      }
-      if (!data.image) {
-        throw new Error("Luma polling returned no image data");
-      }
-
-      updateGeneratedImageMessage(data.image);
-      if (data.image.status === "completed" || data.image.status === "failed") {
-        return;
-      }
-      interval = Math.min(Math.round(interval * 1.5), 5000);
-    }
-
-    throw new Error("Luma generation timed out after 3 minutes");
-  }
-
-  async function sendImagePrompt() {
-    const prompt = input.trim();
-    if (!prompt || isBusy) return;
-    if (!lumaConfigured) {
-      setUploadError("Add a Luma API key in Settings before generating images.");
-      return;
-    }
-
-    const nonImage = attachedFiles.find((file) => file.type !== "image");
-    if (nonImage) {
-      setUploadError(`Remove ${nonImage.name}. Image mode only accepts image files.`);
-      return;
-    }
-    if (attachedFiles.length > 9) {
-      setUploadError("Luma supports one source image plus up to 8 references.");
-      return;
-    }
-
-    const lumaImages = attachedFiles
-      .map(imageAttachmentToLuma)
-      .filter((image): image is LumaInlineImage => image !== null);
-    const source = lumaImages[0] || null;
-    const imageRef = source ? lumaImages.slice(1) : [];
-    const sourceGenerationId = source ? null : latestGeneratedImage?.id || null;
-    const inputPreviewImages = attachedFiles.map(imageAttachmentToBase64);
-    const isImageEdit = !!source || !!sourceGenerationId;
-
-    const userMessage: Message = {
-      role: "user",
-      content: `${isImageEdit ? "Edit image" : "Generate image"}: ${prompt}`,
-      ...(inputPreviewImages.length > 0 ? { images: inputPreviewImages } : {}),
-    };
-    const pendingAssistant: Message = {
-      role: "assistant",
-      content: `Submitting ${isImageEdit ? "image edit" : "image request"}: ${prompt}`,
-    };
-    const newMessages = [...messages, userMessage];
-
-    setMessages([...newMessages, pendingAssistant]);
-    setInput("");
-    setAttachedFiles([]);
-    setPendingRawFiles([]);
-    setUploadError(null);
-    setIsGeneratingImage(true);
-
-    try {
-      const res = await fetch("/api/luma/generations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt,
-          chatId,
-          messages: newMessages,
-          aspectRatio: lumaAspectRatio || null,
-          style: lumaStyle,
-          outputFormat: lumaOutputFormat || null,
-          webSearch: lumaWebSearch,
-          source,
-          sourceGenerationId,
-          imageRef,
-        }),
-      });
-      const data = (await res.json()) as {
-        chatId?: string;
-        assistantMessage?: Message;
-        image?: NonNullable<Message["generatedImage"]>;
-        error?: string;
-      };
-
-      if (!res.ok || !data.assistantMessage || !data.image) {
-        throw new Error(data.error || `Luma request failed: ${res.status}`);
-      }
-
-      if (data.chatId) {
-        setChatId(data.chatId);
-        chatIdRef.current = data.chatId;
-      }
-
-      setMessages([...newMessages, data.assistantMessage]);
-      refreshChatList();
-      await pollLumaGeneration(data.image.id);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      setMessages((prev) => {
-        const updated = [...prev];
-        const last = updated[updated.length - 1];
-        if (last?.role === "assistant") {
-          updated[updated.length - 1] = {
-            ...last,
-            content: `Image generation failed: ${message}`,
-          };
-        }
-        return updated;
-      });
-    } finally {
-      setIsGeneratingImage(false);
-      refreshChatList();
-    }
-  }
-
   async function sendMessage(e: FormEvent) {
     e.preventDefault();
-    if (composerMode === "image") {
-      await sendImagePrompt();
-      return;
-    }
     if ((!input.trim() && attachedFiles.length === 0) || isBusy) return;
 
     // Resolve pending text/PDF files now (extract content via /api/upload).
@@ -1717,7 +1490,6 @@ export default function ChatPage() {
     setMessages([]);
     setInput("");
     setChatId(null);
-    setComposerMode("chat");
   }
 
   return (
@@ -1993,16 +1765,6 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Luma image generation indicator */}
-      {isGeneratingImage && (
-        <div className="flex items-center justify-center gap-2 py-2 px-4 bg-fuchsia-50 dark:bg-fuchsia-950/30 border-t border-fuchsia-200 dark:border-fuchsia-900">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-fuchsia-500 animate-pulse" />
-          <span className="text-sm text-fuchsia-700 dark:text-fuchsia-300">
-            Generating image with Luma...
-          </span>
-        </div>
-      )}
-
       {/* Input */}
       <div className="border-t border-zinc-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] dark:border-zinc-800 dark:bg-zinc-900 sm:p-4">
         <form onSubmit={sendMessage} className="max-w-3xl mx-auto">
@@ -2021,115 +1783,6 @@ export default function ChatPage() {
               variant="mobile"
             />
           </div>
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <div className="flex rounded-lg bg-zinc-100 dark:bg-zinc-800 p-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setComposerMode("chat");
-                  setUploadError(null);
-                }}
-                disabled={isBusy}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors disabled:opacity-50 ${
-                  composerMode === "chat"
-                    ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm"
-                    : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-                }`}
-              >
-                Chat
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setComposerMode("image");
-                  setAttachedFiles((prev) => prev.filter((file) => file.type === "image"));
-                  setPendingRawFiles((prev) =>
-                    prev.filter((_, index) => attachedFiles[index]?.type === "image")
-                  );
-                  setUploadError(null);
-                }}
-                disabled={isBusy}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors disabled:opacity-50 ${
-                  composerMode === "image"
-                    ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm"
-                    : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-                }`}
-              >
-                Image
-              </button>
-            </div>
-
-            {composerMode === "image" && (
-              <>
-                <select
-                  value={lumaAspectRatio}
-                  onChange={(e) => setLumaAspectRatio(e.target.value as LumaAspectRatioOption)}
-                  disabled={isBusy}
-                  className="h-8 min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 text-xs text-zinc-700 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 sm:flex-none"
-                  title="Aspect ratio"
-                >
-                  {LUMA_ASPECT_RATIOS.map((ratio) => (
-                    <option key={ratio || "auto"} value={ratio}>
-                      {ratio || "Auto ratio"}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={lumaStyle}
-                  onChange={(e) => setLumaStyle(e.target.value as LumaStyleOption)}
-                  disabled={isBusy}
-                  className="h-8 min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 text-xs text-zinc-700 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 sm:flex-none"
-                  title="Style"
-                >
-                  {LUMA_STYLES.map((style) => (
-                    <option key={style} value={style}>
-                      {style === "auto" ? "Auto style" : "Manga"}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={lumaOutputFormat}
-                  onChange={(e) => setLumaOutputFormat(e.target.value as LumaOutputFormatOption)}
-                  disabled={isBusy}
-                  className="h-8 min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 text-xs text-zinc-700 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 sm:flex-none"
-                  title="Output format"
-                >
-                  {LUMA_OUTPUT_FORMATS.map((format) => (
-                    <option key={format || "auto"} value={format}>
-                      {format ? format.toUpperCase() : "Auto format"}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setLumaWebSearch((v) => !v)}
-                  disabled={isBusy}
-                  className={`h-8 flex-shrink-0 rounded-md border px-2.5 text-xs font-medium transition-colors disabled:opacity-50 ${
-                    lumaWebSearch
-                      ? "border-fuchsia-300 dark:border-fuchsia-800 bg-fuchsia-50 dark:bg-fuchsia-950 text-fuchsia-700 dark:text-fuchsia-300"
-                      : "border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                  }`}
-                  title="Luma web search"
-                >
-                  Web refs
-                </button>
-                {!lumaConfigured && (
-                  <Link
-                    href="/settings"
-                    className="text-xs text-red-600 dark:text-red-400 underline underline-offset-2"
-                  >
-                    Add Luma key
-                  </Link>
-                )}
-                {lumaConfigured && latestGeneratedImage && attachedFiles.length === 0 && (
-                  <span className="text-xs text-fuchsia-600 dark:text-fuchsia-400">
-                    Editing latest image
-                  </span>
-                )}
-              </>
-            )}
-          </div>
-
           {/* Attached file chips */}
           {(attachedFiles.length > 0 || uploadError) && (
             <div className="mb-2 flex flex-wrap gap-2">
@@ -2148,7 +1801,7 @@ export default function ChatPage() {
             ref={fileInputRef}
             type="file"
             multiple
-            accept={composerMode === "image" ? "image/*" : "image/*,.pdf,.txt,.md,.json,.csv,.yaml,.yml,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.c,.cpp,.cs,.php,.swift,.sh,.sql,.html,.css"}
+            accept="image/*,.pdf,.txt,.md,.json,.csv,.yaml,.yml,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.c,.cpp,.cs,.php,.swift,.sh,.sql,.html,.css"
             onChange={handleFileInputChange}
             className="hidden"
           />
@@ -2158,11 +1811,11 @@ export default function ChatPage() {
               onClick={() => fileInputRef.current?.click()}
               disabled={isBusy}
               className="flex-shrink-0 w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              title={composerMode === "image" ? "Attach source or reference image" : "Attach file"}
+              title="Attach file"
             >
               <PaperclipIcon />
             </button>
-            {composerMode === "chat" && (() => {
+            {(() => {
               const sel = customProviders.find((p) => p.id === selectedProviderId);
               const isLocal = !selectedProviderId;
               const isAnthropic = sel?.type === "anthropic";
@@ -2212,9 +1865,7 @@ export default function ChatPage() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={
-                composerMode === "image"
-                  ? lumaConfigured ? "Describe the image you want, or attach one to edit" : "Add a Luma key in Settings"
-                  : noChatBackend ? "Set up a model first ↑" : isRecording ? "Listening..." : "Ask me anything"
+                noChatBackend ? "Set up a model first ↑" : isRecording ? "Listening..." : "Ask me anything"
               }
               rows={1}
               disabled={composerDisabled}
@@ -2224,7 +1875,7 @@ export default function ChatPage() {
             <button
               type="button"
               onClick={isRecording ? stopRecording : startRecording}
-              disabled={composerDisabled || isBusy || composerMode === "image"}
+              disabled={composerDisabled || isBusy}
               className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
                 isRecording
                   ? "bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400 animate-pulse"
@@ -2238,29 +1889,27 @@ export default function ChatPage() {
                 <line x1="12" y1="19" x2="12" y2="22" />
               </svg>
             </button>
-            {composerMode === "chat" && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (voiceAgentDisabledReason) {
-                    setUploadError(voiceAgentDisabledReason);
-                    return;
-                  }
-                  setUploadError(null);
-                  setShowVoiceAgent(true);
-                }}
-                disabled={isBusy}
-                className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
-                  voiceAgentDisabledReason
-                    ? "text-amber-500 hover:bg-amber-50 hover:text-amber-600 dark:text-amber-400 dark:hover:bg-amber-950 dark:hover:text-amber-300"
-                    : "text-zinc-500 hover:bg-emerald-50 hover:text-emerald-600 dark:text-zinc-400 dark:hover:bg-emerald-950 dark:hover:text-emerald-300"
-                }`}
-                title={voiceAgentDisabledReason || "Start Voice Agent"}
-                aria-label={voiceAgentDisabledReason || "Start Voice Agent"}
-              >
-                <VoiceAgentIcon />
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (voiceAgentDisabledReason) {
+                  setUploadError(voiceAgentDisabledReason);
+                  return;
+                }
+                setUploadError(null);
+                setShowVoiceAgent(true);
+              }}
+              disabled={isBusy}
+              className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
+                voiceAgentDisabledReason
+                  ? "text-amber-500 hover:bg-amber-50 hover:text-amber-600 dark:text-amber-400 dark:hover:bg-amber-950 dark:hover:text-amber-300"
+                  : "text-zinc-500 hover:bg-emerald-50 hover:text-emerald-600 dark:text-zinc-400 dark:hover:bg-emerald-950 dark:hover:text-emerald-300"
+              }`}
+              title={voiceAgentDisabledReason || "Start Voice Agent"}
+              aria-label={voiceAgentDisabledReason || "Start Voice Agent"}
+            >
+              <VoiceAgentIcon />
+            </button>
             {isStreaming ? (
               <button
                 type="button"
@@ -2278,7 +1927,7 @@ export default function ChatPage() {
                 disabled={
                   isBusy ||
                   composerDisabled ||
-                  (composerMode === "image" ? !input.trim() : (!input.trim() && attachedFiles.length === 0))
+                  (!input.trim() && attachedFiles.length === 0)
                 }
                 className="flex-shrink-0 w-8 h-8 rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
               >
@@ -3178,9 +2827,6 @@ const MessageBubble = memo(function MessageBubble({ message, onSpeak }: { messag
             ))}
           </div>
         )}
-        {message.generatedImage && (
-          <GeneratedImagePreview image={message.generatedImage} />
-        )}
         {thinkContent && (
           <details className="mb-3" open={thinkingInProgress}>
             <summary className="text-xs text-amber-600 dark:text-amber-400 cursor-pointer hover:underline">
@@ -3248,45 +2894,6 @@ const MessageBubble = memo(function MessageBubble({ message, onSpeak }: { messag
     </div>
   );
 });
-
-function GeneratedImagePreview({ image }: { image: NonNullable<Message["generatedImage"]> }) {
-  const isReady = image.status === "completed" && image.url;
-  const isFailed = image.status === "failed";
-
-  return (
-    <div className="mb-3 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950">
-      {isReady ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={image.url}
-          alt={image.prompt}
-          className="block w-full max-h-[520px] object-contain bg-zinc-100 dark:bg-zinc-900"
-        />
-      ) : (
-        <div className="flex min-h-[180px] items-center justify-center bg-zinc-100 dark:bg-zinc-900">
-          {isFailed ? (
-            <div className="px-4 text-center text-sm text-red-600 dark:text-red-400">
-              {image.failureReason || "Luma could not generate this image."}
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-fuchsia-500 animate-pulse" />
-              {image.status === "processing" ? "Processing image..." : "Queued with Luma..."}
-            </div>
-          )}
-        </div>
-      )}
-      <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-[10px] text-zinc-500 dark:text-zinc-400">
-        <span className="font-mono uppercase">{image.status}</span>
-        {image.generationType === "image_edit" && <span>edit</span>}
-        {image.aspectRatio && <span>{image.aspectRatio}</span>}
-        {image.style && image.style !== "auto" && <span>{image.style}</span>}
-        {image.outputFormat && <span>{image.outputFormat}</span>}
-        {image.webSearch && <span>web refs</span>}
-      </div>
-    </div>
-  );
-}
 
 function MarkdownContent({ content }: { content: string }) {
   return (

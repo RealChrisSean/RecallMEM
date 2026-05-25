@@ -94,7 +94,7 @@ That is intentionally conservative. Missing a memory is annoying. Storing a stal
 
 We also changed retrieval.
 
-Vector search is great at meaning. If you ask "what image thing were we building?", pgvector can find old Luma conversations.
+Vector search is great at meaning. If you ask "what voice thing were we building?", pgvector can find old voice-agent conversations.
 
 But meaning is not exactness.
 

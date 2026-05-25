@@ -18,7 +18,6 @@ function cleanMessages(messages: Message[] | undefined): Message[] {
     .map((m) => ({
       role: m.role,
       content: m.content.trim(),
-      ...(m.generatedImage ? { generatedImage: m.generatedImage } : {}),
       ...(m.usage ? { usage: m.usage } : {}),
     }));
 }

@@ -170,9 +170,6 @@ export default function SettingsPage() {
 
   const [braveKey, setBraveKey] = useState("");
   const [braveConfigured, setBraveConfigured] = useState<boolean | null>(null);
-  const [lumaKey, setLumaKey] = useState("");
-  const [lumaConfigured, setLumaConfigured] = useState<boolean | null>(null);
-  const [lumaSavedFlash, setLumaSavedFlash] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState<string | null>(null);
 
@@ -307,50 +304,7 @@ export default function SettingsPage() {
       .then((r) => r.json())
       .then((j: { configured?: boolean }) => setBraveConfigured(!!j.configured))
       .catch(() => setBraveConfigured(false));
-
-    fetch("/api/settings?key=luma_api_key")
-      .then((r) => r.json())
-      .then((j: { configured?: boolean }) => setLumaConfigured(!!j.configured))
-      .catch(() => setLumaConfigured(false));
   }, []);
-
-  async function saveLumaKey() {
-    if (!lumaKey.trim()) return;
-    setSaving(true);
-    try {
-      const res = await fetch("/api/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: "luma_api_key", value: lumaKey.trim() }),
-      });
-      if (res.ok) {
-        setLumaConfigured(true);
-        setLumaKey("");
-        setLumaSavedFlash("Saved");
-        setTimeout(() => setLumaSavedFlash(null), 2000);
-      }
-    } catch (err) {
-      console.error("Failed to save Luma key:", err);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function clearLumaKey() {
-    if (!confirm("Remove the Luma API key? Image generation in chat will stop working.")) return;
-    try {
-      await fetch("/api/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: "luma_api_key", value: "" }),
-      });
-      setLumaConfigured(false);
-      setLumaSavedFlash("Removed");
-      setTimeout(() => setLumaSavedFlash(null), 2000);
-    } catch (err) {
-      console.error("Failed to clear Luma key:", err);
-    }
-  }
 
   async function saveBraveKey() {
     if (!braveKey.trim()) return;
@@ -582,69 +536,6 @@ export default function SettingsPage() {
                 );
               })}
             </div>
-          </div>
-        </section>
-
-        <section>
-          <h2 className="flex items-center justify-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider mb-3">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="8.5" cy="8.5" r="1.5" />
-              <path d="m21 15-5-5L5 21" />
-            </svg>
-            Image generation
-          </h2>
-          <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4 leading-relaxed">
-              RecallMEM uses Luma&apos;s uni-1 model for image generation inside chat. Your prompt is sent to Luma when you use image mode, and completed images are downloaded back into your local database so chat history keeps working after Luma&apos;s temporary URL expires.
-            </p>
-
-            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
-              Luma API key
-              {lumaConfigured === true && (
-                <span className="ml-2 text-xs font-normal text-emerald-600 dark:text-emerald-400">
-                  Configured
-                </span>
-              )}
-              {lumaConfigured === false && (
-                <span className="ml-2 text-xs font-normal text-zinc-500">
-                  Not set
-                </span>
-              )}
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={lumaKey}
-                onChange={(e) => setLumaKey(e.target.value)}
-                placeholder={lumaConfigured ? "Paste a new key to replace" : "luma-api-..."}
-                className="flex-1 text-sm font-mono px-3 py-2 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700"
-              />
-              <button
-                onClick={saveLumaKey}
-                disabled={!lumaKey.trim() || saving}
-                className="px-4 py-2 text-sm font-medium rounded-md bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {saving ? "Saving..." : "Save"}
-              </button>
-              {lumaConfigured && (
-                <button
-                  onClick={clearLumaKey}
-                  className="px-4 py-2 text-sm font-medium rounded-md border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
-                >
-                  Remove
-                </button>
-              )}
-            </div>
-            {lumaSavedFlash && (
-              <div className="mt-2 text-xs text-emerald-600 dark:text-emerald-400">
-                {lumaSavedFlash}
-              </div>
-            )}
-
-            <p className="text-xs text-zinc-500 dark:text-zinc-500 mt-4 leading-relaxed">
-              The key is stored locally in Postgres and is only used by the server when you generate images. Luma receives your image prompt, selected options, and web-search preference for that request.
-            </p>
           </div>
         </section>
 

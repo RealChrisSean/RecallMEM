@@ -16,7 +16,6 @@ const ALLOWED_KEYS = new Set([
   "voice_agent_voice",
   "voice_agent_speed",
   "voice_agent_style",
-  "luma_api_key",
 ]);
 
 // GET /api/settings?key=brave_search_api_key
