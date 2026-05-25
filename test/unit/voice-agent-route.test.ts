@@ -161,7 +161,7 @@ describe("voice-agent route", () => {
       },
       output: {
         encoding: "linear16",
-        sample_rate: 24000,
+        sample_rate: 48000,
         container: "none",
       },
     });

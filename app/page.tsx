@@ -1461,9 +1461,9 @@ export default function ChatPage() {
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      sendMessage(e as unknown as FormEvent);
+      e.currentTarget.form?.requestSubmit();
     }
   }
 
@@ -1869,6 +1869,7 @@ export default function ChatPage() {
               }
               rows={1}
               disabled={composerDisabled}
+              title="Enter for a new line. Shift+Enter or Cmd/Ctrl+Enter to send."
               className="min-w-0 flex-1 resize-none bg-transparent py-3 text-base text-zinc-900 placeholder:text-zinc-400 focus:outline-none disabled:opacity-50 dark:text-zinc-100 sm:text-sm"
             />
             {/* Mic button — STT dictation */}
@@ -1930,6 +1931,7 @@ export default function ChatPage() {
                   (!input.trim() && attachedFiles.length === 0)
                 }
                 className="flex-shrink-0 w-8 h-8 rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
+                title="Send"
               >
                 <ArrowUpIcon />
               </button>
@@ -2477,22 +2479,23 @@ function ChatListRow({
       <button
         onClick={onClick}
         disabled={disabled}
-        className="w-full text-left px-3 py-2 pr-14 text-sm text-zinc-700 dark:text-zinc-300 truncate disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full truncate px-3 py-2.5 pr-24 text-left text-base text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-300 sm:py-2 sm:pr-14 sm:text-sm"
       >
         {chat.title || "Untitled"}
       </button>
-      <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+      <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 sm:right-1 sm:gap-0.5">
         <button
           onClick={(e) => {
             e.stopPropagation();
             onTogglePin();
           }}
           disabled={disabled}
-          className={`w-6 h-6 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 flex items-center justify-center transition-opacity disabled:cursor-not-allowed ${
+          className={`flex h-8 w-8 touch-manipulation items-center justify-center rounded transition-opacity hover:bg-zinc-200 disabled:cursor-not-allowed dark:hover:bg-zinc-700 sm:h-6 sm:w-6 ${
             chat.is_pinned
               ? "opacity-100 text-amber-500"
-              : "opacity-0 group-hover:opacity-100 text-zinc-500 dark:text-zinc-400"
+              : "text-zinc-500 opacity-100 dark:text-zinc-400 sm:opacity-0 sm:group-hover:opacity-100"
           }`}
+          aria-label={chat.is_pinned ? "Unpin chat" : "Pin chat"}
           title={chat.is_pinned ? "Unpin chat" : "Pin chat"}
         >
           {chat.is_pinned ? <StarFilledIcon /> : <StarIcon />}
@@ -2503,7 +2506,8 @@ function ChatListRow({
             onDelete();
           }}
           disabled={disabled}
-          className="w-6 h-6 rounded opacity-0 group-hover:opacity-100 hover:bg-zinc-200 dark:hover:bg-zinc-700 flex items-center justify-center text-zinc-500 dark:text-zinc-400 transition-opacity disabled:cursor-not-allowed"
+          className="flex h-8 w-8 touch-manipulation items-center justify-center rounded text-zinc-500 opacity-100 transition-opacity hover:bg-zinc-200 disabled:cursor-not-allowed dark:text-zinc-400 dark:hover:bg-zinc-700 sm:h-6 sm:w-6 sm:opacity-0 sm:group-hover:opacity-100"
+          aria-label="Delete chat"
           title="Delete chat"
         >
           <TrashIcon />

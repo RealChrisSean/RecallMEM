@@ -716,7 +716,7 @@ export default function SettingsPage() {
                     onChange={(e) => { setTtsProvider(e.target.value); setTtsVoice(""); }}
                     className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100"
                   >
-                    <option value="auto">Auto (cheapest available)</option>
+                    <option value="auto">Auto (Deepgram if configured)</option>
                     <option value="xai" disabled={!ttsAvailable.xai}>xAI Grok ($4.20/1M chars){!ttsAvailable.xai ? " -- no API key" : ""}</option>
                     <option value="deepgram" disabled={!ttsAvailable.deepgram}>Deepgram Aura-2 ($30/1M chars){!ttsAvailable.deepgram ? " -- no API key" : ""}</option>
                     <option value="openai" disabled={!ttsAvailable.openai}>OpenAI HD ($30/1M chars){!ttsAvailable.openai ? " -- no API key" : ""}</option>
@@ -792,7 +792,7 @@ export default function SettingsPage() {
             <div>
               <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3">Voice Agent</h3>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
-                These settings control the live Deepgram Voice Agent, not the speaker icon on normal chat messages.
+                These settings control the live Deepgram Voice Agent and the speaker icon on normal chat messages.
               </p>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="sm:col-span-2">

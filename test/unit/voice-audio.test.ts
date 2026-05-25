@@ -36,7 +36,7 @@ describe("voice audio helpers", () => {
 
   it("keeps capture chunks short enough for realtime voice", () => {
     expect(VOICE_INPUT_SAMPLE_RATE).toBe(16000);
-    expect(VOICE_OUTPUT_SAMPLE_RATE).toBe(24000);
+    expect(VOICE_OUTPUT_SAMPLE_RATE).toBe(48000);
     expect(VOICE_CAPTURE_BUFFER_SIZE).toBe(2048);
     expect((VOICE_CAPTURE_BUFFER_SIZE / 48000) * 1000).toBeLessThan(45);
     expect((VOICE_CAPTURE_BUFFER_SIZE / VOICE_INPUT_SAMPLE_RATE) * 1000).toBeLessThan(130);

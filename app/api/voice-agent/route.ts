@@ -5,6 +5,10 @@ import { getPinnedFacts, getActiveFacts } from "@/lib/facts";
 import { getRules } from "@/lib/rules";
 import { getProvider } from "@/lib/providers";
 import type { Message } from "@/lib/types";
+import {
+  VOICE_INPUT_SAMPLE_RATE,
+  VOICE_OUTPUT_SAMPLE_RATE,
+} from "@/lib/voice-audio";
 
 export const runtime = "nodejs";
 
@@ -403,11 +407,11 @@ async function buildConfig(body: VoiceAgentRequest) {
     audio: {
       input: {
         encoding: "linear16",
-        sample_rate: 16000,
+        sample_rate: VOICE_INPUT_SAMPLE_RATE,
       },
       output: {
         encoding: "linear16",
-        sample_rate: 24000,
+        sample_rate: VOICE_OUTPUT_SAMPLE_RATE,
         container: "none",
       },
     },

@@ -26,6 +26,25 @@ const VOICES: Record<string, string[]> = {
   ],
 };
 
+const DEFAULT_DEEPGRAM_VOICE = "aura-2-amalthea-en";
+const DEFAULT_DEEPGRAM_SPEED = 1.0;
+
+function normalizeDeepgramVoice(voice: string | null | undefined, fallback?: string | null) {
+  const candidates = [voice, fallback, DEFAULT_DEEPGRAM_VOICE];
+  for (const candidate of candidates) {
+    const value = (candidate || "").trim();
+    if (VOICES.deepgram.includes(value)) return value;
+  }
+  return DEFAULT_DEEPGRAM_VOICE;
+}
+
+function normalizeDeepgramSpeed(speed: string | null | undefined) {
+  if (!speed) return DEFAULT_DEEPGRAM_SPEED;
+  const numeric = Number(speed);
+  if (!Number.isFinite(numeric)) return DEFAULT_DEEPGRAM_SPEED;
+  return Math.min(1.5, Math.max(0.7, numeric));
+}
+
 /**
  * GET /api/tts — returns available TTS providers + current settings
  */
@@ -62,11 +81,11 @@ export async function GET() {
     available: { xai: hasXAIVoice, openai: hasOpenAI, deepgram: hasDeepgram, browser: true },
     voices: VOICES,
     settings: {
-      provider: ttsProvider || (hasXAI ? "xai" : hasOpenAI ? "openai" : "browser"),
+      provider: ttsProvider || (hasDeepgram ? "deepgram" : hasXAI ? "xai" : hasOpenAI ? "openai" : "browser"),
       voice: ttsVoice || null,
       sttProvider: sttProvider || (hasDeepgram ? "deepgram" : "whisper"),
       voiceChatMode: voiceChatMode || "separate",
-      voiceAgentVoice: voiceAgentVoice || "aura-2-amalthea-en",
+      voiceAgentVoice: normalizeDeepgramVoice(voiceAgentVoice),
       voiceAgentSpeed: voiceAgentSpeed || "1",
       voiceAgentStyle: voiceAgentStyle || "natural",
     },
@@ -81,26 +100,43 @@ export async function POST(req: NextRequest) {
   if (!text) return Response.json({ error: "text required" }, { status: 400 });
 
   // Parallel DB lookups -- cuts ~40ms off cold start
-  const [providers, ttsProvider, ttsVoice, deepgramKey, xaiVoiceKeySetting] = await Promise.all([
+  const [
+    providers,
+    ttsProvider,
+    ttsVoice,
+    deepgramKey,
+    xaiVoiceKeySetting,
+    voiceAgentVoice,
+    voiceAgentSpeed,
+  ] = await Promise.all([
     listProviders(),
     getSetting("tts_provider"),
     getSetting("tts_voice"),
     getSetting("deepgram_api_key"),
     getSetting("xai_voice_api_key"),
+    getSetting("voice_agent_voice"),
+    getSetting("voice_agent_speed"),
   ]);
 
   const xai = providers.find((p) => p.type === "openai-compatible" && p.api_key && p.base_url?.includes("x.ai"));
   const openai = providers.find((p) => p.type === "openai" && p.api_key);
   const xaiVoiceKey = xaiVoiceKeySetting || xai?.api_key;
 
-  // Determine which provider to use (setting > auto-detect by cost)
-  const provider = ttsProvider || (hasKey(xai) ? "xai" : hasKey(openai) ? "openai" : deepgramKey ? "deepgram" : "browser");
+  // Determine which provider to use (setting > Deepgram voice stack > fallback providers).
+  const provider = ttsProvider || (deepgramKey ? "deepgram" : hasKey(xai) ? "xai" : hasKey(openai) ? "openai" : "browser");
 
   // --- Deepgram ---
   if (provider === "deepgram" && deepgramKey) {
-    const voice = ttsVoice || "aura-2-aurora-en";
+    const voice = normalizeDeepgramVoice(ttsVoice, voiceAgentVoice);
+    const speed = normalizeDeepgramSpeed(voiceAgentSpeed);
     const inputText = text.slice(0, 10000);
-    const res = await fetch(`https://api.deepgram.com/v1/speak?model=${voice}&encoding=mp3`, {
+    const params = new URLSearchParams({
+      model: voice,
+      encoding: "mp3",
+      bit_rate: "48000",
+      speed: String(speed),
+    });
+    const res = await fetch(`https://api.deepgram.com/v1/speak?${params}`, {
       method: "POST",
       headers: {
         Authorization: `Token ${deepgramKey}`,
