@@ -86,6 +86,7 @@ export default function ChatPage() {
   const sttContextRef = useRef<AudioContext | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTranscriptTimeRef = useRef(Date.now());
+  const submitIntentRef = useRef(false);
   const [idlePrompt, setIdlePrompt] = useState(false);
   const [idleCountdown, setIdleCountdown] = useState(30);
   const idleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1215,6 +1216,9 @@ export default function ChatPage() {
 
   async function sendMessage(e: FormEvent) {
     e.preventDefault();
+    const shouldSubmit = submitIntentRef.current;
+    submitIntentRef.current = false;
+    if (!shouldSubmit) return;
     if ((!input.trim() && attachedFiles.length === 0) || isBusy) return;
 
     // Resolve pending text/PDF files now (extract content via /api/upload).
@@ -1463,6 +1467,7 @@ export default function ChatPage() {
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
       e.preventDefault();
+      submitIntentRef.current = true;
       e.currentTarget.form?.requestSubmit();
     }
   }
@@ -1924,7 +1929,11 @@ export default function ChatPage() {
               </button>
             ) : (
               <button
-                type="submit"
+                type="button"
+                onClick={() => {
+                  submitIntentRef.current = true;
+                  inputRef.current?.form?.requestSubmit();
+                }}
                 disabled={
                   isBusy ||
                   composerDisabled ||
