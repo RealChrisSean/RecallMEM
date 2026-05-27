@@ -14,10 +14,59 @@ const VoiceAgent = dynamic(() => import("@/components/VoiceAgent"), { ssr: false
 
 const MODEL_STORAGE_KEY = "recallmem_selected_model";
 const SIDEBAR_STORAGE_KEY = "recallmem_sidebar_open";
+const CHAT_FONT_STORAGE_KEY = "recallmem_chat_font_scale";
+const CHAT_RETRY_STATUSES = new Set([408, 502, 503, 504]);
+const CHAT_RETRY_DELAYS_MS = [700, 1500, 3000, 5000];
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 const DEFAULT_MODEL: ModelId = "gemma4:26b";
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
+
+const CHAT_FONT_SCALES = {
+  sm: {
+    label: "Small",
+    bubble: "text-sm leading-6",
+    markdown: "prose-sm",
+    emptyPrimary: "text-sm",
+    emptySecondary: "text-xs",
+    composer: "text-sm",
+    thinking: "text-xs leading-relaxed",
+  },
+  md: {
+    label: "Default",
+    bubble: "text-base leading-7",
+    markdown: "",
+    emptyPrimary: "text-base",
+    emptySecondary: "text-sm",
+    composer: "text-base",
+    thinking: "text-sm leading-relaxed",
+  },
+  lg: {
+    label: "Large",
+    bubble: "text-lg leading-8",
+    markdown: "prose-lg",
+    emptyPrimary: "text-lg",
+    emptySecondary: "text-base",
+    composer: "text-lg",
+    thinking: "text-base leading-7",
+  },
+  xl: {
+    label: "Extra Large",
+    bubble: "text-xl leading-9",
+    markdown: "prose-xl",
+    emptyPrimary: "text-xl",
+    emptySecondary: "text-lg",
+    composer: "text-xl",
+    thinking: "text-lg leading-8",
+  },
+} as const;
+
+type ChatFontScale = keyof typeof CHAT_FONT_SCALES;
+const CHAT_FONT_SCALE_ORDER: ChatFontScale[] = ["sm", "md", "lg", "xl"];
 
 interface ChatListItem {
   id: string;
@@ -67,6 +116,7 @@ export default function ChatPage() {
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [privateMode, setPrivateMode] = useState(false);
   const [showBrainPicker, setShowBrainPicker] = useState(true);
+  const [chatFontScale, setChatFontScale] = useState<ChatFontScale>("md");
 
   // Sync brain picker visibility from localStorage on mount.
   // Uses a layout-blocking approach: inject a style tag immediately
@@ -75,7 +125,18 @@ export default function ChatPage() {
     if (localStorage.getItem("recallmem.showBrainPicker") === "false") {
       setShowBrainPicker(false);
     }
+    const savedFontScale = localStorage.getItem(CHAT_FONT_STORAGE_KEY);
+    if (
+      savedFontScale &&
+      CHAT_FONT_SCALE_ORDER.includes(savedFontScale as ChatFontScale)
+    ) {
+      setChatFontScale(savedFontScale as ChatFontScale);
+    }
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(CHAT_FONT_STORAGE_KEY, chatFontScale);
+  }, [chatFontScale]);
 
   const [showBrainHint, setShowBrainHint] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -1288,26 +1349,70 @@ export default function ChatPage() {
     try {
       const abort = new AbortController();
       abortRef.current = abort;
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: newMessages,
-          mode,
-          chatId,
-          ...(selectedProviderId
-            ? { providerId: selectedProviderId, model: selectedProviderModel || undefined }
-            : { model: selectedModel }),
-          webSearch,
-          thinking: thinkingEnabled,
-          privateMode,
-        }),
-        signal: abort.signal,
+      const requestBody = JSON.stringify({
+        messages: newMessages,
+        mode,
+        chatId,
+        ...(selectedProviderId
+          ? { providerId: selectedProviderId, model: selectedProviderModel || undefined }
+          : { model: selectedModel }),
+        webSearch,
+        thinking: thinkingEnabled,
+        privateMode,
       });
+      let res: Response | null = null;
+      let lastError: Error | null = null;
 
-      if (!res.ok || !res.body) {
-        throw new Error(`Request failed: ${res.status}`);
+      for (let attempt = 0; attempt <= CHAT_RETRY_DELAYS_MS.length; attempt++) {
+        try {
+          res = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: requestBody,
+            signal: abort.signal,
+          });
+
+          if (res.ok && res.body) {
+            break;
+          }
+
+          const retryable = CHAT_RETRY_STATUSES.has(res.status);
+          if (!retryable || attempt === CHAT_RETRY_DELAYS_MS.length) {
+            throw new Error(`Request failed: ${res.status}`);
+          }
+          lastError = new Error(`Request failed: ${res.status}`);
+        } catch (err) {
+          if ((err as Error).name === "AbortError") throw err;
+          if (attempt === CHAT_RETRY_DELAYS_MS.length) {
+            throw err;
+          }
+          lastError = err instanceof Error ? err : new Error("Network request failed");
+        }
+
+        const delay = CHAT_RETRY_DELAYS_MS[attempt];
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: `Reconnecting... retry ${attempt + 1}/${CHAT_RETRY_DELAYS_MS.length}`,
+          };
+          return updated;
+        });
+        await sleep(delay);
       }
+
+      if (!res?.ok || !res.body) {
+        throw lastError || new Error("Request failed");
+      }
+
+      setMessages((prev) => {
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        if (last?.role === "assistant" && last.content?.startsWith("Reconnecting...")) {
+          updated[updated.length - 1] = { role: "assistant", content: "" };
+        }
+        return updated;
+      });
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -1464,6 +1569,13 @@ export default function ChatPage() {
     }
   }
 
+  function cycleChatFontScale() {
+    setChatFontScale((current) => {
+      const index = CHAT_FONT_SCALE_ORDER.indexOf(current);
+      return CHAT_FONT_SCALE_ORDER[(index + 1) % CHAT_FONT_SCALE_ORDER.length];
+    });
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
       e.preventDefault();
@@ -1496,6 +1608,8 @@ export default function ChatPage() {
     setInput("");
     setChatId(null);
   }
+
+  const chatFont = CHAT_FONT_SCALES[chatFontScale];
 
   return (
     <div
@@ -1628,6 +1742,18 @@ export default function ChatPage() {
               Memory
             </span>
           </Link>
+          <button
+            type="button"
+            onClick={cycleChatFontScale}
+            title={`Chat font: ${chatFont.label}`}
+            aria-label={`Chat font size: ${chatFont.label}. Click to change.`}
+            className="group relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border border-zinc-200 text-sm font-semibold tracking-tight text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            Aa
+            <span className="pointer-events-none absolute top-full right-0 z-50 mt-1.5 whitespace-nowrap rounded bg-zinc-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 shadow-md transition-opacity group-hover:opacity-100 dark:bg-zinc-100 dark:text-zinc-900">
+              Font: {chatFont.label}
+            </span>
+          </button>
           <ThemeToggle />
           {/* Unrestricted mode hidden until vMLX + abliterated Gemma 4 is set up. See TODO.md */}
           <button
@@ -1661,16 +1787,23 @@ export default function ChatPage() {
         <div className="mx-auto max-w-3xl space-y-6 px-3 py-4 sm:px-4 sm:py-6">
           {messages.length === 0 ? (
             <div className="py-16 text-center sm:py-20">
-              <p className="text-base text-zinc-500 dark:text-zinc-400 sm:text-sm">
+              <p className={`${chatFont.emptyPrimary} text-zinc-500 dark:text-zinc-400`}>
                 Start a conversation. Everything stays on your machine.
                 <br />
-                <span className="text-sm text-zinc-400 dark:text-zinc-600 sm:text-xs">
+                <span className={`${chatFont.emptySecondary} text-zinc-400 dark:text-zinc-600`}>
                   Cloud LLMs (Anthropic, OpenAI, etc.) only see what you send them.
                 </span>
               </p>
             </div>
           ) : (
-            messages.map((msg, i) => <MessageBubble key={i} message={msg} onSpeak={speakText} />)
+            messages.map((msg, i) => (
+              <MessageBubble
+                key={i}
+                message={msg}
+                onSpeak={speakText}
+                fontScale={chatFontScale}
+              />
+            ))
           )}
         </div>
       </div>
@@ -1875,7 +2008,7 @@ export default function ChatPage() {
               rows={1}
               disabled={composerDisabled}
               title="Enter for a new line. Shift+Enter or Cmd/Ctrl+Enter to send."
-              className="min-w-0 flex-1 resize-none bg-transparent py-3 text-base text-zinc-900 placeholder:text-zinc-400 focus:outline-none disabled:opacity-50 dark:text-zinc-100 sm:text-sm"
+              className={`min-w-0 flex-1 resize-none bg-transparent py-3 ${chatFont.composer} text-zinc-900 placeholder:text-zinc-400 focus:outline-none disabled:opacity-50 dark:text-zinc-100`}
             />
             {/* Mic button — STT dictation */}
             <button
@@ -2789,8 +2922,17 @@ function TrashIcon() {
   );
 }
 
-const MessageBubble = memo(function MessageBubble({ message, onSpeak }: { message: Message; onSpeak?: (text: string) => void }) {
+const MessageBubble = memo(function MessageBubble({
+  message,
+  onSpeak,
+  fontScale,
+}: {
+  message: Message;
+  onSpeak?: (text: string) => void;
+  fontScale: ChatFontScale;
+}) {
   const isUser = message.role === "user";
+  const chatFont = CHAT_FONT_SCALES[fontScale];
   const [copied, setCopied] = useState(false);
 
   // Parse <think>...</think> from assistant content for display.
@@ -2821,7 +2963,7 @@ const MessageBubble = memo(function MessageBubble({ message, onSpeak }: { messag
   return (
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`relative max-w-[92%] rounded-2xl px-4 py-3 text-base leading-7 sm:max-w-[85%] sm:text-sm sm:leading-relaxed ${
+        className={`relative max-w-[92%] rounded-2xl px-4 py-3 ${chatFont.bubble} sm:max-w-[85%] ${
           isUser
             ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 whitespace-pre-wrap"
             : "bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100"
@@ -2845,7 +2987,7 @@ const MessageBubble = memo(function MessageBubble({ message, onSpeak }: { messag
             <summary className="text-sm text-amber-600 dark:text-amber-400 cursor-pointer hover:underline sm:text-xs">
               {thinkingInProgress ? "Thinking..." : "Thought process"}
             </summary>
-            <div className="mt-2 border-l-2 border-amber-300 pl-3 text-sm italic leading-relaxed whitespace-pre-wrap text-zinc-500 dark:border-amber-800 dark:text-zinc-400 sm:text-xs">
+            <div className={`mt-2 border-l-2 border-amber-300 pl-3 ${chatFont.thinking} italic whitespace-pre-wrap text-zinc-500 dark:border-amber-800 dark:text-zinc-400`}>
               {thinkContent}
             </div>
           </details>
@@ -2855,7 +2997,7 @@ const MessageBubble = memo(function MessageBubble({ message, onSpeak }: { messag
         ) : isUser ? (
           displayContent
         ) : displayContent ? (
-          <MarkdownContent content={displayContent} />
+          <MarkdownContent content={displayContent} fontScale={fontScale} />
         ) : null}
         {/* Copy button — inside bubble, top-right, appears on hover */}
         {message.content && (
@@ -2908,9 +3050,16 @@ const MessageBubble = memo(function MessageBubble({ message, onSpeak }: { messag
   );
 });
 
-function MarkdownContent({ content }: { content: string }) {
+function MarkdownContent({
+  content,
+  fontScale,
+}: {
+  content: string;
+  fontScale: ChatFontScale;
+}) {
+  const chatFont = CHAT_FONT_SCALES[fontScale];
   return (
-    <div className="prose prose-zinc max-w-none prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none dark:prose-invert sm:prose-sm">
+    <div className={`prose prose-zinc max-w-none ${chatFont.markdown} prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none dark:prose-invert`}>
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   );
