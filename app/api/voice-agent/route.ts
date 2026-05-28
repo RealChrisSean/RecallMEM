@@ -33,7 +33,7 @@ const FALLBACK_OPENAI_THINK_PROVIDER = {
 } as const;
 const FALLBACK_ANTHROPIC_THINK_PROVIDER = {
   type: "anthropic",
-  model: "claude-4-5-haiku-latest",
+  model: "claude-haiku-4-5",
 } as const;
 
 const VOICE_AGENT_STYLE_INSTRUCTIONS: Record<string, string> = {

@@ -109,7 +109,7 @@ describe("voice-agent route", () => {
     });
     expect(body.settings.agent.think[2].provider).toEqual({
       type: "anthropic",
-      model: "claude-4-5-haiku-latest",
+      model: "claude-haiku-4-5",
     });
     expect(body.settings.agent.think[0].prompt).toContain("You are RecallMEM");
     expect(body.settings.agent.think[1].prompt).toBe(body.settings.agent.think[0].prompt);
@@ -118,7 +118,7 @@ describe("voice-agent route", () => {
     );
     expect(body.thinkFallbackModels).toEqual([
       "open_ai:gpt-5.4-mini",
-      "anthropic:claude-4-5-haiku-latest",
+      "anthropic:claude-haiku-4-5",
     ]);
   });
 
@@ -151,7 +151,7 @@ describe("voice-agent route", () => {
     });
     expect(body.settings.agent.think[1].provider).toEqual({
       type: "anthropic",
-      model: "claude-4-5-haiku-latest",
+      model: "claude-haiku-4-5",
     });
     expect(body.settings.agent.think[2].provider).toEqual({
       type: "open_ai",
