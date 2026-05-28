@@ -12,12 +12,29 @@ import {
 
 export const runtime = "nodejs";
 
-const MAX_PROFILE_CHARS = 4000;
-const MAX_FACTS = 40;
-const MAX_HISTORY_MESSAGES = 12;
+const MAX_PROFILE_CHARS = 1800;
+const MAX_FACTS = 20;
+const MAX_PINNED_FACTS = 10;
+const MAX_FACT_CHARS = 280;
+const MAX_HISTORY_MESSAGES = 4;
+const MAX_HISTORY_CHARS = 700;
+const MAX_CUSTOM_RULES_CHARS = 1200;
+const MAX_PRONUNCIATION_CHARS = 800;
 const DEEPGRAM_AGENT_URL = "wss://agent.deepgram.com/v1/agent/converse";
+const VOICE_AGENT_LISTEN_MODEL = "flux-general-en";
+const VOICE_AGENT_LISTEN_MODEL_LABEL = "Flux";
+const VOICE_AGENT_LISTEN_PROVIDER_VERSION = "v2";
 const DEFAULT_VOICE_AGENT_VOICE = "aura-2-amalthea-en";
+const VOICE_AGENT_FALLBACK_VOICE = "aura-2-thalia-en";
 const DEFAULT_VOICE_AGENT_SPEED = 1.0;
+const FALLBACK_OPENAI_THINK_PROVIDER = {
+  type: "open_ai",
+  model: "gpt-5.4-mini",
+} as const;
+const FALLBACK_ANTHROPIC_THINK_PROVIDER = {
+  type: "anthropic",
+  model: "claude-4-5-haiku-latest",
+} as const;
 
 const VOICE_AGENT_STYLE_INSTRUCTIONS: Record<string, string> = {
   natural:
@@ -33,6 +50,14 @@ const VOICE_AGENT_STYLE_INSTRUCTIONS: Record<string, string> = {
   energetic:
     "Speaking style: upbeat and energetic. Keep the tempo lively while staying useful and not overwhelming.",
 };
+
+const DEFAULT_PRONUNCIATION_GUIDANCE = [
+  "Say RecallMEM as \"recall mem\".",
+  "Say pgvector as \"pee gee vector\".",
+  "Say Fly.io as \"fly eye oh\".",
+  "Say GPT-5.5 as \"GPT five point five\" and similar model names naturally.",
+  "For exact model IDs, project names, API names, and user names, preserve the wording but speak it naturally instead of reading punctuation awkwardly.",
+].join(" ");
 
 class DeepgramGrantError extends Error {
   constructor(
@@ -71,6 +96,7 @@ type DeepgramThinkProvider =
 
 interface VoiceThinkSelection {
   provider: DeepgramThinkProvider;
+  fallbackProviders: DeepgramThinkProvider[];
   providerId: string;
   model: string;
   label: string;
@@ -127,6 +153,16 @@ async function getDeepgramBrowserCredential(apiKey: string) {
   }
 }
 
+function truncateText(text: string, maxChars: number) {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `${trimmed.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+function compactVoiceText(text: string, maxChars: number) {
+  return truncateText(text.replace(/\s+/g, " "), maxChars);
+}
+
 function recentHistory(messages: Message[] | undefined) {
   return (messages || [])
     .filter((m) => m.role === "user" || m.role === "assistant")
@@ -135,7 +171,8 @@ function recentHistory(messages: Message[] | undefined) {
     .map((m) => ({
       type: "History",
       role: m.role,
-      content: m.content.slice(0, 4000),
+      // Realtime voice should start fast. Older detail can come from search_memory.
+      content: compactVoiceText(m.content, MAX_HISTORY_CHARS),
     }));
 }
 
@@ -161,7 +198,91 @@ function normalizeVoiceAgentSpeed(speed: string | null) {
   return Math.min(1.5, Math.max(0.7, numeric));
 }
 
-async function buildVoicePrompt(privateMode: boolean, styleInstruction: string) {
+function buildPronunciationGuidance(customNotes: string | null) {
+  const notes = truncateText((customNotes || "").trim(), MAX_PRONUNCIATION_CHARS);
+  return notes
+    ? `${DEFAULT_PRONUNCIATION_GUIDANCE}\n\nUser pronunciation notes:\n${notes}`
+    : DEFAULT_PRONUNCIATION_GUIDANCE;
+}
+
+function uniqueThinkProviders(providers: DeepgramThinkProvider[]) {
+  const seen = new Set<string>();
+  return providers.filter((provider) => {
+    const key = `${provider.type}:${provider.model}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function fallbackThinkProviders(primary: DeepgramThinkProvider) {
+  const preferred =
+    primary.type === "anthropic"
+      ? [FALLBACK_ANTHROPIC_THINK_PROVIDER, FALLBACK_OPENAI_THINK_PROVIDER]
+      : [FALLBACK_OPENAI_THINK_PROVIDER, FALLBACK_ANTHROPIC_THINK_PROVIDER];
+  return uniqueThinkProviders([primary, ...preferred]).slice(1);
+}
+
+function makeVoiceThinkSelection(
+  provider: DeepgramThinkProvider,
+  providerId: string,
+  model: string,
+  label: string
+): VoiceThinkSelection {
+  return {
+    provider,
+    fallbackProviders: fallbackThinkProviders(provider),
+    providerId,
+    model,
+    label,
+  };
+}
+
+function buildThinkChain(
+  selection: VoiceThinkSelection,
+  prompt: string,
+  functions: {
+    name: string;
+    description: string;
+    parameters: {
+      type: string;
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+  }[]
+) {
+  return [selection.provider, ...selection.fallbackProviders].map((provider) => ({
+    provider,
+    prompt,
+    ...(functions.length > 0 ? { functions } : {}),
+  }));
+}
+
+function buildSpeakChain(voiceModel: string, voiceSpeed: number) {
+  const primary = {
+    provider: {
+      type: "deepgram" as const,
+      model: voiceModel,
+      speed: voiceSpeed,
+    },
+  };
+  const fallback = {
+    provider: {
+      type: "deepgram" as const,
+      model:
+        voiceModel === VOICE_AGENT_FALLBACK_VOICE
+          ? DEFAULT_VOICE_AGENT_VOICE
+          : VOICE_AGENT_FALLBACK_VOICE,
+    },
+  };
+  return [primary, fallback];
+}
+
+async function buildVoicePrompt(
+  privateMode: boolean,
+  styleInstruction: string,
+  pronunciationGuidance: string
+) {
   const customRules = await getRules();
   const now = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
@@ -180,16 +301,18 @@ Current time: ${now}
 
 ${styleInstruction}
 
+Pronunciation guidance: ${pronunciationGuidance}
+
 Private mode is ON. Do not use stored memory, profile facts, or past conversations. Only use the current voice session and the custom rules below.
 
-${customRules ? `<custom_rules>\n${customRules.slice(0, 2000)}\n</custom_rules>\n` : ""}
+${customRules ? `<custom_rules>\n${truncateText(customRules, MAX_CUSTOM_RULES_CHARS)}\n</custom_rules>\n` : ""}
 
 Speak like a real person. No markdown, no bullet points, no numbered lists.`;
   }
 
   const [profileRow, pinnedFacts, recentFacts] = await Promise.all([
     getProfile(),
-    getPinnedFacts(20),
+    getPinnedFacts(MAX_PINNED_FACTS),
     getActiveFacts(MAX_FACTS),
   ]);
 
@@ -199,7 +322,7 @@ Speak like a real person. No markdown, no bullet points, no numbered lists.`;
     if (!seen.has(f.id) && facts.length < MAX_FACTS) {
       seen.add(f.id);
       facts.push({
-        text: f.fact_text,
+        text: compactVoiceText(f.fact_text, MAX_FACT_CHARS),
         date: (f.valid_from || f.created_at).toISOString().slice(0, 10),
       });
     }
@@ -208,14 +331,14 @@ Speak like a real person. No markdown, no bullet points, no numbered lists.`;
     if (!seen.has(f.id) && facts.length < MAX_FACTS) {
       seen.add(f.id);
       facts.push({
-        text: f.fact_text,
+        text: compactVoiceText(f.fact_text, MAX_FACT_CHARS),
         date: (f.valid_from || f.created_at).toISOString().slice(0, 10),
       });
     }
   }
 
   const profile = profileRow?.profile_summary
-    ? profileRow.profile_summary.slice(0, MAX_PROFILE_CHARS)
+    ? compactVoiceText(profileRow.profile_summary, MAX_PROFILE_CHARS)
     : null;
 
   return `You are RecallMEM, the user's personal AI with persistent memory, in a live voice conversation. Be concise, direct, warm, and conversational. This is spoken audio, so avoid markdown, bullets, numbered lists, tables, and long monologues.
@@ -224,7 +347,9 @@ Current time: ${now}
 
 ${styleInstruction}
 
-${customRules ? `<custom_rules>\n${customRules.slice(0, 2000)}\n</custom_rules>\n` : ""}
+Pronunciation guidance: ${pronunciationGuidance}
+
+${customRules ? `<custom_rules>\n${truncateText(customRules, MAX_CUSTOM_RULES_CHARS)}\n</custom_rules>\n` : ""}
 ${profile ? `<user_profile>\n${profile}\n</user_profile>` : "This is a new user. Learn about them naturally as you talk."}
 
 ${facts.length > 0 ? `<important_memory>\n${facts.map((f) => `[${f.date}] ${f.text}`).join("\n")}\n</important_memory>` : ""}
@@ -277,21 +402,21 @@ async function resolveVoiceThinkProvider(
   }
 
   if (provider.type === "openai") {
-    return {
-      provider: { type: "open_ai", model: normalizedModel },
-      providerId: provider.id,
-      model: normalizedModel,
-      label: `${normalizedModel} via OpenAI`,
-    };
+    return makeVoiceThinkSelection(
+      { type: "open_ai", model: normalizedModel },
+      provider.id,
+      normalizedModel,
+      `${normalizedModel} via OpenAI`
+    );
   }
 
   if (provider.type === "anthropic") {
-    return {
-      provider: { type: "anthropic", model: normalizedModel },
-      providerId: provider.id,
-      model: normalizedModel,
-      label: `${normalizedModel} via Anthropic`,
-    };
+    return makeVoiceThinkSelection(
+      { type: "anthropic", model: normalizedModel },
+      provider.id,
+      normalizedModel,
+      `${normalizedModel} via Anthropic`
+    );
   }
 
   if (provider.type === "openai-compatible") {
@@ -302,48 +427,48 @@ async function resolveVoiceThinkProvider(
     }
 
     if (modelKey.startsWith("claude-") || providerKey.includes("anthropic")) {
-      return {
-        provider: { type: "anthropic", model: normalizedModel },
-        providerId: provider.id,
-        model: normalizedModel,
-        label: `${normalizedModel} via Anthropic`,
-      };
+      return makeVoiceThinkSelection(
+        { type: "anthropic", model: normalizedModel },
+        provider.id,
+        normalizedModel,
+        `${normalizedModel} via Anthropic`
+      );
     }
 
     if (modelKey.startsWith("gemini-") || providerKey.includes("google")) {
-      return {
-        provider: { type: "google", model: normalizedModel },
-        providerId: provider.id,
-        model: normalizedModel,
-        label: `${normalizedModel} via Google`,
-      };
+      return makeVoiceThinkSelection(
+        { type: "google", model: normalizedModel },
+        provider.id,
+        normalizedModel,
+        `${normalizedModel} via Google`
+      );
     }
 
     if (modelKey.startsWith("gpt-") || /^o\d/.test(modelKey) || providerKey.includes("openai")) {
-      return {
-        provider: { type: "open_ai", model: normalizedModel },
-        providerId: provider.id,
-        model: normalizedModel,
-        label: `${normalizedModel} via OpenAI`,
-      };
+      return makeVoiceThinkSelection(
+        { type: "open_ai", model: normalizedModel },
+        provider.id,
+        normalizedModel,
+        `${normalizedModel} via OpenAI`
+      );
     }
 
     if (providerKey.includes("groq")) {
-      return {
-        provider: { type: "groq", model: normalizedModel },
-        providerId: provider.id,
-        model: normalizedModel,
-        label: `${normalizedModel} via Groq`,
-      };
+      return makeVoiceThinkSelection(
+        { type: "groq", model: normalizedModel },
+        provider.id,
+        normalizedModel,
+        `${normalizedModel} via Groq`
+      );
     }
 
     if (providerKey.includes("cerebras")) {
-      return {
-        provider: { type: "cerebras", model: normalizedModel },
-        providerId: provider.id,
-        model: normalizedModel,
-        label: `${normalizedModel} via Cerebras`,
-      };
+      return makeVoiceThinkSelection(
+        { type: "cerebras", model: normalizedModel },
+        provider.id,
+        normalizedModel,
+        `${normalizedModel} via Cerebras`
+      );
     }
   }
 
@@ -363,18 +488,20 @@ async function buildConfig(body: VoiceAgentRequest) {
 
   const privateMode = !!body.privateMode;
   const thinkSelection = await resolveVoiceThinkProvider(body);
-  const [credential, voiceSetting, speedSetting, styleSetting] = await Promise.all([
+  const [credential, voiceSetting, speedSetting, styleSetting, pronunciationSetting] = await Promise.all([
     getDeepgramBrowserCredential(deepgramKey),
     getSetting("voice_agent_voice"),
     getSetting("voice_agent_speed"),
     getSetting("voice_agent_style"),
+    getSetting("voice_agent_pronunciation"),
   ]);
   const voiceModel = normalizeVoiceAgentVoice(voiceSetting);
   const voiceSpeed = normalizeVoiceAgentSpeed(speedSetting);
   const voiceStyle = normalizeVoiceAgentStyle(styleSetting);
   const prompt = await buildVoicePrompt(
     privateMode,
-    resolveVoiceAgentStyle(voiceStyle)
+    resolveVoiceAgentStyle(voiceStyle),
+    buildPronunciationGuidance(pronunciationSetting)
   );
 
   const history = recentHistory(body.messages);
@@ -397,6 +524,8 @@ async function buildConfig(body: VoiceAgentRequest) {
           },
         },
       ];
+  const thinkChain = buildThinkChain(thinkSelection, prompt, functions);
+  const speakChain = buildSpeakChain(voiceModel, voiceSpeed);
 
   const settings = {
     type: "Settings",
@@ -420,22 +549,12 @@ async function buildConfig(body: VoiceAgentRequest) {
       listen: {
         provider: {
           type: "deepgram",
-          model: "nova-3",
-          smart_format: true,
+          version: VOICE_AGENT_LISTEN_PROVIDER_VERSION,
+          model: VOICE_AGENT_LISTEN_MODEL,
         },
       },
-      think: {
-        provider: thinkSelection.provider,
-        prompt,
-        ...(functions.length > 0 ? { functions } : {}),
-      },
-      speak: {
-        provider: {
-          type: "deepgram",
-          model: voiceModel,
-          speed: voiceSpeed,
-        },
-      },
+      think: thinkChain,
+      speak: speakChain,
       greeting: "Hey, I'm here. What's up?",
     },
   };
@@ -450,9 +569,16 @@ async function buildConfig(body: VoiceAgentRequest) {
       thinkModel: thinkSelection.model,
       thinkProviderId: thinkSelection.providerId,
       thinkModelLabel: thinkSelection.label,
+      thinkFallbackModels: thinkSelection.fallbackProviders.map(
+        (provider) => `${provider.type}:${provider.model}`
+      ),
+      listenModel: VOICE_AGENT_LISTEN_MODEL,
+      listenModelLabel: VOICE_AGENT_LISTEN_MODEL_LABEL,
       voiceModel,
+      voiceFallbackModel: speakChain[1]?.provider.model || null,
       voiceSpeed,
       voiceStyle,
+      voicePronunciation: pronunciationSetting || "",
       settings,
     },
     {

@@ -28,6 +28,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@deepgram/agents": "^0.1.1",
     "@langchain/core": "^1.1.39",
     "@langchain/openai": "^1.4.3",
     "class-variance-authority": "^0.7.1",

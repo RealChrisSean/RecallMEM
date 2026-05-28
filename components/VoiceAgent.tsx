@@ -1,15 +1,11 @@
 "use client";
 
+import { AgentMicrophone, AgentPlayer } from "@deepgram/agents";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message } from "@/lib/types";
 import {
-  VOICE_CAPTURE_BUFFER_SIZE,
   VOICE_INPUT_SAMPLE_RATE,
   VOICE_OUTPUT_SAMPLE_RATE,
-  float32ToPcm16,
-  nextPlaybackStartTime,
-  pcm16ToFloat32,
-  resampleLinear,
 } from "@/lib/voice-audio";
 
 type VoiceStatus =
@@ -37,6 +33,8 @@ interface VoiceAgentConfig {
   thinkModel?: string;
   thinkProviderId?: string | null;
   thinkModelLabel?: string;
+  listenModel?: string;
+  listenModelLabel?: string;
   voiceModel?: string;
   voiceSpeed?: number;
   voiceStyle?: string;
@@ -72,21 +70,17 @@ export default function VoiceAgent({
   const [thinkModelLabel, setThinkModelLabel] = useState<string | null>(
     selectedModel
   );
+  const [listenModelLabel, setListenModelLabel] = useState("Flux");
   const [voiceModelLabel, setVoiceModelLabel] = useState("Aura-2 Amalthea");
 
   const wsRef = useRef<WebSocket | null>(null);
-  const captureContextRef = useRef<AudioContext | null>(null);
-  const playbackContextRef = useRef<AudioContext | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const silenceGainRef = useRef<GainNode | null>(null);
-  const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
-  const playbackTimeRef = useRef(0);
+  const microphoneRef = useRef<AgentMicrophone | null>(null);
+  const playerRef = useRef<AgentPlayer | null>(null);
   const keepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const connectingRef = useRef(false);
-  const streamingAudioRef = useRef(false);
+  const settingsAppliedRef = useRef(false);
   const chatIdRef = useRef(chatId);
   const messagesRef = useRef<Message[]>(messages);
   const lastSavedLengthRef = useRef(messages.length);
@@ -109,9 +103,10 @@ export default function VoiceAgent({
 
   useEffect(() => {
     micMutedRef.current = micMuted;
-    mediaStreamRef.current?.getAudioTracks().forEach((track) => {
-      track.enabled = !micMuted;
-    });
+    const microphone = microphoneRef.current;
+    if (!microphone) return;
+    if (micMuted) microphone.mute();
+    else microphone.unmute();
   }, [micMuted]);
 
   useEffect(() => {
@@ -140,41 +135,15 @@ export default function VoiceAgent({
   }
 
   function stopPlayback() {
-    activeSourcesRef.current.forEach((source) => {
-      try {
-        source.stop();
-      } catch {
-        // Already stopped.
-      }
-    });
-    activeSourcesRef.current = [];
-    playbackTimeRef.current = 0;
+    playerRef.current?.interrupt();
   }
 
   function playPcm16(arrayBuffer: ArrayBuffer) {
     if (arrayBuffer.byteLength === 0) return;
-    const ctx =
-      playbackContextRef.current ||
-      new AudioContext({ sampleRate: VOICE_OUTPUT_SAMPLE_RATE });
-    playbackContextRef.current = ctx;
-
-    void ctx.resume().catch(() => {});
-    const float32 = pcm16ToFloat32(arrayBuffer);
-
-    const audioBuffer = ctx.createBuffer(1, float32.length, VOICE_OUTPUT_SAMPLE_RATE);
-    audioBuffer.getChannelData(0).set(float32);
-
-    const source = ctx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(ctx.destination);
-    source.onended = () => {
-      activeSourcesRef.current = activeSourcesRef.current.filter((s) => s !== source);
-    };
-
-    const startAt = nextPlaybackStartTime(ctx.currentTime, playbackTimeRef.current);
-    playbackTimeRef.current = startAt + audioBuffer.duration;
-    activeSourcesRef.current.push(source);
-    source.start(startAt);
+    const player =
+      playerRef.current || new AgentPlayer({ sampleRate: VOICE_OUTPUT_SAMPLE_RATE });
+    playerRef.current = player;
+    player.queue(arrayBuffer);
     setStatus("speaking");
   }
 
@@ -283,36 +252,6 @@ export default function VoiceAgent({
     );
   }
 
-  function startAudioStreaming(stream: MediaStream) {
-    const ws = wsRef.current;
-    if (!ws || streamingAudioRef.current) return;
-    streamingAudioRef.current = true;
-
-    const audioCtx = new AudioContext({ sampleRate: VOICE_INPUT_SAMPLE_RATE });
-    captureContextRef.current = audioCtx;
-    const source = audioCtx.createMediaStreamSource(stream);
-    const processor = audioCtx.createScriptProcessor(VOICE_CAPTURE_BUFFER_SIZE, 1, 1);
-    const silenceGain = audioCtx.createGain();
-    silenceGain.gain.value = 0;
-
-    processorRef.current = processor;
-    silenceGainRef.current = silenceGain;
-
-    processor.onaudioprocess = (event) => {
-      if (ws.readyState !== WebSocket.OPEN) return;
-      if (micMutedRef.current) return;
-      const input = event.inputBuffer.getChannelData(0);
-      const pcm = float32ToPcm16(
-        resampleLinear(input, audioCtx.sampleRate, VOICE_INPUT_SAMPLE_RATE)
-      );
-      ws.send(pcm);
-    };
-
-    source.connect(processor);
-    processor.connect(silenceGain);
-    silenceGain.connect(audioCtx.destination);
-  }
-
   const connect = useCallback(async () => {
     if (connectingRef.current) return;
     connectingRef.current = true;
@@ -348,25 +287,31 @@ export default function VoiceAgent({
         thinkModel: rawConfig.thinkModel,
         thinkProviderId: rawConfig.thinkProviderId,
         thinkModelLabel: rawConfig.thinkModelLabel,
+        listenModel: rawConfig.listenModel,
+        listenModelLabel: rawConfig.listenModelLabel,
         voiceModel: rawConfig.voiceModel,
         voiceSpeed: rawConfig.voiceSpeed,
         voiceStyle: rawConfig.voiceStyle,
       };
       setThinkModelLabel(config.thinkModelLabel || config.thinkModel || selectedModel);
+      setListenModelLabel(config.listenModelLabel || config.listenModel || "Flux");
       setVoiceModelLabel(formatDeepgramVoice(config.voiceModel));
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: VOICE_INPUT_SAMPLE_RATE,
-        },
+      const microphone = new AgentMicrophone((data) => {
+        const ws = wsRef.current;
+        if (!settingsAppliedRef.current || !ws || ws.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        ws.send(data);
+      }, {
+        sampleRate: VOICE_INPUT_SAMPLE_RATE,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
       });
-      mediaStreamRef.current = stream;
-      stream.getAudioTracks().forEach((track) => {
-        track.enabled = !micMutedRef.current;
-      });
+      microphoneRef.current = microphone;
+      if (micMutedRef.current) microphone.mute();
+      await microphone.start();
 
       const ws = new WebSocket(config.endpoint, [
         config.authProtocol || "bearer",
@@ -410,8 +355,8 @@ export default function VoiceAgent({
             break;
 
           case "SettingsApplied":
+            settingsAppliedRef.current = true;
             setStatus("listening");
-            startAudioStreaming(stream);
             break;
 
           case "UserStartedSpeaking":
@@ -491,27 +436,12 @@ export default function VoiceAgent({
       clearInterval(keepAliveRef.current);
       keepAliveRef.current = null;
     }
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
-    }
-    if (silenceGainRef.current) {
-      silenceGainRef.current.disconnect();
-      silenceGainRef.current = null;
-    }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-      mediaStreamRef.current = null;
-    }
-    if (captureContextRef.current) {
-      captureContextRef.current.close().catch(() => {});
-      captureContextRef.current = null;
-    }
+    settingsAppliedRef.current = false;
+    microphoneRef.current?.stop();
+    microphoneRef.current = null;
     stopPlayback();
-    if (playbackContextRef.current) {
-      playbackContextRef.current.close().catch(() => {});
-      playbackContextRef.current = null;
-    }
+    playerRef.current?.dispose();
+    playerRef.current = null;
     if (wsRef.current) {
       const ws = wsRef.current;
       wsRef.current = null;
@@ -519,7 +449,6 @@ export default function VoiceAgent({
         ws.close();
       }
     }
-    streamingAudioRef.current = false;
   }
 
   useEffect(() => {
@@ -696,7 +625,7 @@ export default function VoiceAgent({
 
         <div className="flex items-center justify-between gap-3 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800 sm:px-5">
           <div className="min-w-0 text-xs text-zinc-500 dark:text-zinc-400">
-            Nova-3 · {voiceModelLabel} · Deepgram
+            {listenModelLabel} · {voiceModelLabel} · Deepgram
             {micMuted && <span className="ml-2 text-amber-600 dark:text-amber-300">Mic muted</span>}
           </div>
           <button

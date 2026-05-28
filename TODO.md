@@ -4,6 +4,28 @@ What's done, what's planned. Updated as of v0.1 prep.
 
 ---
 
+## Deepgram voice agent roadmap
+
+Process rule for these changes:
+
+- [ ] Work through this list one item at a time.
+- [ ] Before moving to the next item, test the current item end-to-end.
+- [ ] Do not start the next item until Chris approves it.
+
+Planned voice-agent upgrades:
+
+- [x] **Switch voice STT from Nova-3 to Flux.** Use `flux-general-en` as the default voice-agent listener model because Flux is designed for lower-latency conversational turn detection. Consider `flux-general-multi` when multilingual mode is enabled.
+- [x] **Evaluate Deepgram Browser Agent SDK pieces.** Adopt `@deepgram/agents` for microphone capture and PCM playback while keeping RecallMEM's custom WebSocket/session bridge for auth fallback, memory tool calls, and chat persistence.
+- [x] **Add LLM and TTS fallback chains.** Configure voice-agent `think` and `speak` providers as ordered fallback arrays so transient model/provider failures do not kill the live voice session.
+- [x] **Add Deepgram voice settings.** Let users choose voice, speaking speed, and speaking style in Settings, with pronunciation guidance for app-specific terms like `RecallMEM`, `pgvector`, `Fly.io`, model names, and user names.
+- [ ] **Add dead-air filler during memory/tool calls.** Use Deepgram agent message injection to say short status lines like "Let me check your memory for that" while memory search or tools are running.
+- [ ] **Feed memory keyterms into STT.** Pull names, projects, model IDs, companies, and weird exact phrases from RecallMEM memory into Deepgram keyterms so voice transcription catches important terms more reliably.
+- [ ] **Audit audio output quality.** Verify output encoding, sample rate, playback buffer handling, and raw PCM/container settings so voice playback avoids static, clicks, overlap, and phone-call quality.
+- [ ] **Add multilingual/code-switching mode.** Support Deepgram multilingual Flux where appropriate, while documenting that first-party Filipino/Tagalog Aura voice support may require prompt tuning or another TTS provider.
+- [ ] **Skip diarization for the live agent for now.** Diarization v2 is useful for recorded multi-speaker audio, but it is not a priority for our current one-person live voice-agent flow.
+
+---
+
 ## Memory reliability roadmap
 
 Top priority items before we make bigger memory changes:

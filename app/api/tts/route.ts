@@ -60,6 +60,7 @@ export async function GET() {
     voiceAgentVoice,
     voiceAgentSpeed,
     voiceAgentStyle,
+    voiceAgentPronunciation,
   ] = await Promise.all([
     listProviders(),
     getSetting("xai_voice_api_key"),
@@ -71,6 +72,7 @@ export async function GET() {
     getSetting("voice_agent_voice"),
     getSetting("voice_agent_speed"),
     getSetting("voice_agent_style"),
+    getSetting("voice_agent_pronunciation"),
   ]);
   const hasOpenAI = providers.some((p) => p.type === "openai" && p.api_key);
   const hasXAI = providers.some((p) => p.type === "openai-compatible" && p.api_key && p.base_url?.includes("x.ai"));
@@ -88,6 +90,7 @@ export async function GET() {
       voiceAgentVoice: normalizeDeepgramVoice(voiceAgentVoice),
       voiceAgentSpeed: voiceAgentSpeed || "1",
       voiceAgentStyle: voiceAgentStyle || "natural",
+      voiceAgentPronunciation: voiceAgentPronunciation || "",
     },
   });
 }

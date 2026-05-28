@@ -51,6 +51,7 @@ describe("tts route", () => {
     ]);
     mocks.getSetting.mockImplementation(async (key: string) => {
       if (key === "deepgram_api_key") return "deepgram-key";
+      if (key === "voice_agent_pronunciation") return "Chris = kris.";
       return null;
     });
 
@@ -61,6 +62,7 @@ describe("tts route", () => {
     expect(body.available.openai).toBe(true);
     expect(body.settings.provider).toBe("deepgram");
     expect(body.settings.voiceAgentVoice).toBe("aura-2-amalthea-en");
+    expect(body.settings.voiceAgentPronunciation).toBe("Chris = kris.");
   });
 
   it("uses the Voice Agent Deepgram voice and speed for speaker-button TTS", async () => {

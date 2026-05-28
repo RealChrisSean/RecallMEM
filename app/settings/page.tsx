@@ -83,11 +83,12 @@ export default function SettingsPage() {
   const [voiceAgentVoice, setVoiceAgentVoice] = useState("aura-2-amalthea-en");
   const [voiceAgentSpeed, setVoiceAgentSpeed] = useState("1");
   const [voiceAgentStyle, setVoiceAgentStyle] = useState("natural");
+  const [voiceAgentPronunciation, setVoiceAgentPronunciation] = useState("");
 
   useEffect(() => {
     fetch("/api/tts")
       .then((r) => r.json())
-      .then((d: { available: { xai: boolean; openai: boolean; deepgram: boolean; browser: boolean }; voices: Record<string, string[]>; settings: { provider: string; voice: string | null; sttProvider: string; voiceChatMode?: string; voiceAgentVoice?: string; voiceAgentSpeed?: string; voiceAgentStyle?: string } }) => {
+      .then((d: { available: { xai: boolean; openai: boolean; deepgram: boolean; browser: boolean }; voices: Record<string, string[]>; settings: { provider: string; voice: string | null; sttProvider: string; voiceChatMode?: string; voiceAgentVoice?: string; voiceAgentSpeed?: string; voiceAgentStyle?: string; voiceAgentPronunciation?: string } }) => {
         setTtsAvailable(d.available);
         setTtsVoices(d.voices);
         setTtsProvider(d.settings.provider || "auto");
@@ -97,6 +98,7 @@ export default function SettingsPage() {
         setVoiceAgentVoice(d.settings.voiceAgentVoice || "aura-2-amalthea-en");
         setVoiceAgentSpeed(d.settings.voiceAgentSpeed || "1");
         setVoiceAgentStyle(d.settings.voiceAgentStyle || "natural");
+        setVoiceAgentPronunciation(d.settings.voiceAgentPronunciation || "");
         setDeepgramConfigured(d.available.deepgram);
         // Check xAI voice key separately
         fetch("/api/settings?key=xai_voice_api_key").then(r => r.json()).then((s: { configured?: boolean }) => setXaiVoiceConfigured(!!s.configured)).catch(() => {});
@@ -163,6 +165,11 @@ export default function SettingsPage() {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key: "voice_agent_style", value: voiceAgentStyle }),
+    });
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "voice_agent_pronunciation", value: voiceAgentPronunciation }),
     });
     setTtsSaved(true);
     setTimeout(() => setTtsSaved(false), 2000);
@@ -846,6 +853,23 @@ export default function SettingsPage() {
                   </select>
                   <p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-500">
                     Deepgram controls the voice model and speed. Style is added to the agent prompt so the LLM writes speech with the right tone and pacing.
+                  </p>
+                </div>
+                <div className="sm:col-span-3">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+                    Pronunciation notes
+                  </label>
+                  <textarea
+                    value={voiceAgentPronunciation}
+                    onChange={(e) => setVoiceAgentPronunciation(e.target.value)}
+                    disabled={!ttsAvailable.deepgram}
+                    rows={3}
+                    maxLength={2000}
+                    placeholder={"Example: Chris = kris. Dabatos = duh-BAH-tos. RecallMEM = recall mem. pgvector = pee gee vector."}
+                    className="w-full resize-none rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                  />
+                  <p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-500">
+                    RecallMEM already guides the agent on common terms like RecallMEM, pgvector, Fly.io, and GPT model names. Add personal names or unusual project terms here.
                   </p>
                 </div>
               </div>
