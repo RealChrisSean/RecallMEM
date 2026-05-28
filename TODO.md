@@ -26,7 +26,7 @@ Planned voice-agent upgrades:
   - Add Anthropic adaptive thinking support in the native Messages API path.
   - Force Voice Agent to use the fastest compatible voice model even when text chat is set to Pro or deep/adaptive reasoning.
 - [x] **Add dead-air filler during memory/tool calls.** Use Deepgram agent message injection to say short status lines like "Let me check your memory for that" while memory search or tools are running.
-- [ ] **Feed memory keyterms into STT.** Pull names, projects, model IDs, companies, and weird exact phrases from RecallMEM memory into Deepgram keyterms so voice transcription catches important terms more reliably.
+- [x] **Feed memory keyterms into STT.** Pull names, projects, model IDs, companies, and weird exact phrases from RecallMEM memory into Deepgram keyterms so voice transcription catches important terms more reliably.
 - [ ] **Audit audio output quality.** Verify output encoding, sample rate, playback buffer handling, and raw PCM/container settings so voice playback avoids static, clicks, overlap, and phone-call quality.
 - [ ] **Add multilingual/code-switching mode.** Support Deepgram multilingual Flux where appropriate, while documenting that first-party Filipino/Tagalog Aura voice support may require prompt tuning or another TTS provider.
 - [ ] **Skip diarization for the live agent for now.** Diarization v2 is useful for recorded multi-speaker audio, but it is not a priority for our current one-person live voice-agent flow.

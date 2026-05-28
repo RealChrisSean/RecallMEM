@@ -92,11 +92,15 @@ describe("voice-agent route", () => {
     expect(body.thinkModelLabel).toBe("gpt-5.5 via OpenAI");
     expect(body.listenModel).toBe("flux-general-en");
     expect(body.listenModelLabel).toBe("Flux");
-    expect(body.settings.agent.listen.provider).toEqual({
+    expect(body.settings.agent.listen.provider).toMatchObject({
       type: "deepgram",
       version: "v2",
       model: "flux-general-en",
     });
+    expect(body.settings.agent.listen.provider.keyterms).toEqual(
+      expect.arrayContaining(["RecallMEM", "pgvector", "Fly.io", "Deepgram", "Sprite", "gpt-5.5", "OpenAI"])
+    );
+    expect(body.listenKeyterms).toEqual(body.settings.agent.listen.provider.keyterms);
     expect(body.voiceSpeed).toBe(1);
     expect(body.settings.agent.think).toHaveLength(3);
     expect(body.settings.agent.think[0].provider).toEqual({
@@ -223,6 +227,106 @@ describe("voice-agent route", () => {
     expect(body.settings.agent.think[0].prompt).toContain(
       "Skip it for greetings, quick reactions, general knowledge"
     );
+  });
+
+  it("feeds memory keyterms into Flux STT", async () => {
+    mocks.getProvider.mockResolvedValue({
+      id: "provider-openai",
+      label: "OpenAI",
+      type: "openai",
+      model: "gpt-5.5",
+      base_url: "https://api.openai.com",
+      api_key: "secret",
+      user_id: "local-user",
+      created_at: new Date(),
+    });
+    mocks.getProfile.mockResolvedValue({
+      profile_summary:
+        "Chris Dabatos is building RecallMEM on Sprite with pgvector and Fly.io.",
+    });
+    mocks.getPinnedFacts.mockResolvedValue([
+      {
+        id: "fact-model",
+        fact_text:
+          "User had trouble with grok-4.20-0309-reasoning after hitting enter.",
+        valid_from: null,
+        created_at: new Date("2026-05-01T00:00:00Z"),
+      },
+    ]);
+    mocks.getActiveFacts.mockResolvedValue([
+      {
+        id: "fact-project",
+        fact_text: "User calls the project Local Stack and deploys it on Sprite.",
+        valid_from: null,
+        created_at: new Date("2026-05-02T00:00:00Z"),
+      },
+    ]);
+
+    const res = await POST(
+      request({ providerId: "provider-openai", model: "gpt-5.5", messages: [] })
+    );
+    const body = await res.json();
+    const keyterms = body.settings.agent.listen.provider.keyterms as string[];
+
+    expect(res.status).toBe(200);
+    expect(keyterms).toEqual(
+      expect.arrayContaining([
+        "RecallMEM",
+        "Sprite",
+        "pgvector",
+        "Fly.io",
+        "Chris Dabatos",
+        "grok-4.20-0309-reasoning",
+        "Local Stack",
+      ])
+    );
+    expect(keyterms.length).toBeLessThanOrEqual(80);
+    for (const keyterm of keyterms) {
+      expect(keyterm.length).toBeLessThanOrEqual(64);
+    }
+  });
+
+  it("does not feed stored memory keyterms in private mode", async () => {
+    mocks.getProvider.mockResolvedValue({
+      id: "provider-openai",
+      label: "OpenAI",
+      type: "openai",
+      model: "gpt-5.5",
+      base_url: "https://api.openai.com",
+      api_key: "secret",
+      user_id: "local-user",
+      created_at: new Date(),
+    });
+    mocks.getProfile.mockResolvedValue({
+      profile_summary: "Chris Dabatos uses a project called Local Stack.",
+    });
+    mocks.getPinnedFacts.mockResolvedValue([
+      {
+        id: "fact-private",
+        fact_text: "User had trouble with grok-4.20-0309-reasoning.",
+        valid_from: null,
+        created_at: new Date("2026-05-01T00:00:00Z"),
+      },
+    ]);
+
+    const res = await POST(
+      request({
+        providerId: "provider-openai",
+        model: "gpt-5.5",
+        privateMode: true,
+        messages: [],
+      })
+    );
+    const body = await res.json();
+    const keyterms = body.settings.agent.listen.provider.keyterms as string[];
+
+    expect(res.status).toBe(200);
+    expect(mocks.getProfile).not.toHaveBeenCalled();
+    expect(mocks.getPinnedFacts).not.toHaveBeenCalled();
+    expect(mocks.getActiveFacts).not.toHaveBeenCalled();
+    expect(keyterms).not.toContain("Chris Dabatos");
+    expect(keyterms).not.toContain("Local Stack");
+    expect(keyterms).not.toContain("grok-4.20-0309-reasoning");
   });
 
   it("keeps the voice startup context compact for long chats", async () => {

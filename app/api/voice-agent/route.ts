@@ -20,6 +20,8 @@ const MAX_HISTORY_MESSAGES = 4;
 const MAX_HISTORY_CHARS = 700;
 const MAX_CUSTOM_RULES_CHARS = 1200;
 const MAX_PRONUNCIATION_CHARS = 800;
+const MAX_STT_KEYTERMS = 80;
+const MAX_STT_KEYTERM_CHARS = 64;
 const DEEPGRAM_AGENT_URL = "wss://agent.deepgram.com/v1/agent/converse";
 const VOICE_AGENT_LISTEN_MODEL = "flux-general-en";
 const VOICE_AGENT_LISTEN_MODEL_LABEL = "Flux";
@@ -58,6 +60,62 @@ const DEFAULT_PRONUNCIATION_GUIDANCE = [
   "Say GPT-5.5 as \"GPT five point five\" and similar model names naturally.",
   "For exact model IDs, project names, API names, and user names, preserve the wording but speak it naturally instead of reading punctuation awkwardly.",
 ].join(" ");
+
+const DEFAULT_STT_KEYTERMS = [
+  "RecallMEM",
+  "pgvector",
+  "Fly.io",
+  "Deepgram",
+  "Sprite",
+];
+
+const STT_KEYTERM_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "but",
+  "by",
+  "for",
+  "from",
+  "has",
+  "have",
+  "if",
+  "in",
+  "is",
+  "it",
+  "of",
+  "on",
+  "or",
+  "that",
+  "the",
+  "this",
+  "to",
+  "was",
+  "with",
+  "you",
+  "your",
+  "user",
+  "assistant",
+  "family",
+  "finance",
+  "health",
+  "identity",
+  "interests",
+  "other",
+  "preferences",
+  "profile",
+  "projects",
+  "recent",
+  "social",
+  "current",
+  "private",
+  "speaking",
+  "work",
+]);
 
 class DeepgramGrantError extends Error {
   constructor(
@@ -100,6 +158,11 @@ interface VoiceThinkSelection {
   providerId: string;
   model: string;
   label: string;
+}
+
+interface VoicePromptContext {
+  prompt: string;
+  keyterms: string[];
 }
 
 async function grantDeepgramToken(apiKey: string) {
@@ -205,6 +268,70 @@ function buildPronunciationGuidance(customNotes: string | null) {
     : DEFAULT_PRONUNCIATION_GUIDANCE;
 }
 
+function normalizeSttKeyterm(term: string) {
+  const cleaned = term
+    .replace(/\s+/g, " ")
+    .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, "")
+    .trim();
+  if (cleaned.length < 3 || cleaned.length > MAX_STT_KEYTERM_CHARS) return null;
+  if (!/[A-Za-z0-9]/.test(cleaned)) return null;
+  if (/^https?:\/\//i.test(cleaned) || cleaned.includes("@")) return null;
+  const lower = cleaned.toLowerCase();
+  if (STT_KEYTERM_STOP_WORDS.has(lower)) return null;
+  if (cleaned.split(" ").length > 5) return null;
+  return cleaned;
+}
+
+function addSttKeyterm(keyterms: string[], seen: Set<string>, term: string) {
+  if (keyterms.length >= MAX_STT_KEYTERMS) return;
+  const normalized = normalizeSttKeyterm(term);
+  if (!normalized) return;
+  const key = normalized.toLowerCase();
+  if (seen.has(key)) return;
+  seen.add(key);
+  keyterms.push(normalized);
+}
+
+function extractSttKeytermsFromText(text: string) {
+  const terms: string[] = [];
+  const technicalPattern = /\b[A-Za-z][A-Za-z0-9]*(?:[._:/+#-][A-Za-z0-9]+)+\b/g;
+  for (const match of text.matchAll(technicalPattern)) {
+    terms.push(match[0]);
+  }
+
+  const modelPattern = /\b(?:[A-Z]{2,}[A-Za-z0-9.-]*|[A-Za-z]+-?\d[A-Za-z0-9.-]*)\b/g;
+  for (const match of text.matchAll(modelPattern)) {
+    terms.push(match[0]);
+  }
+
+  const titleCasePattern =
+    /\b[A-Z][A-Za-z0-9]*(?:[.'-][A-Za-z0-9]+)?(?:\s+[A-Z][A-Za-z0-9]*(?:[.'-][A-Za-z0-9]+)?){0,3}\b/g;
+  for (const match of text.matchAll(titleCasePattern)) {
+    terms.push(match[0]);
+  }
+
+  return terms;
+}
+
+function buildSttKeyterms(sources: Array<string | null | undefined>) {
+  const keyterms: string[] = [];
+  const seen = new Set<string>();
+
+  for (const term of DEFAULT_STT_KEYTERMS) {
+    addSttKeyterm(keyterms, seen, term);
+  }
+
+  for (const source of sources) {
+    if (!source || keyterms.length >= MAX_STT_KEYTERMS) continue;
+    for (const term of extractSttKeytermsFromText(source)) {
+      addSttKeyterm(keyterms, seen, term);
+      if (keyterms.length >= MAX_STT_KEYTERMS) break;
+    }
+  }
+
+  return keyterms;
+}
+
 function uniqueThinkProviders(providers: DeepgramThinkProvider[]) {
   const seen = new Set<string>();
   return providers.filter((provider) => {
@@ -278,11 +405,12 @@ function buildSpeakChain(voiceModel: string, voiceSpeed: number) {
   return [primary, fallback];
 }
 
-async function buildVoicePrompt(
+async function buildVoicePromptContext(
   privateMode: boolean,
   styleInstruction: string,
-  pronunciationGuidance: string
-) {
+  pronunciationGuidance: string,
+  keytermSources: Array<string | null | undefined>
+): Promise<VoicePromptContext> {
   const customRules = await getRules();
   const now = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
@@ -295,7 +423,8 @@ async function buildVoicePrompt(
   }).format(new Date());
 
   if (privateMode) {
-    return `You are RecallMEM in a live voice conversation. Keep replies short, warm, and natural.
+    return {
+      prompt: `You are RecallMEM in a live voice conversation. Keep replies short, warm, and natural.
 
 Current time: ${now}
 
@@ -307,7 +436,9 @@ Private mode is ON. Do not use stored memory, profile facts, or past conversatio
 
 ${customRules ? `<custom_rules>\n${truncateText(customRules, MAX_CUSTOM_RULES_CHARS)}\n</custom_rules>\n` : ""}
 
-Speak like a real person. No markdown, no bullet points, no numbered lists.`;
+Speak like a real person. No markdown, no bullet points, no numbered lists.`,
+      keyterms: buildSttKeyterms([...keytermSources, customRules]),
+    };
   }
 
   const [profileRow, pinnedFacts, recentFacts] = await Promise.all([
@@ -341,7 +472,10 @@ Speak like a real person. No markdown, no bullet points, no numbered lists.`;
     ? compactVoiceText(profileRow.profile_summary, MAX_PROFILE_CHARS)
     : null;
 
-  return `You are RecallMEM, the user's personal AI with persistent memory, in a live voice conversation. Be concise, direct, warm, and conversational. This is spoken audio, so avoid markdown, bullets, numbered lists, tables, and long monologues.
+  const factTexts = facts.map((fact) => fact.text);
+
+  return {
+    prompt: `You are RecallMEM, the user's personal AI with persistent memory, in a live voice conversation. Be concise, direct, warm, and conversational. This is spoken audio, so avoid markdown, bullets, numbered lists, tables, and long monologues.
 
 Current time: ${now}
 
@@ -356,7 +490,9 @@ ${facts.length > 0 ? `<important_memory>\n${facts.map((f) => `[${f.date}] ${f.te
 
 You also have a search_memory tool backed by RecallMEM's Postgres/pgvector database. Use it when the user asks about themselves, past decisions, ongoing projects, preferences, relationships, finances, health, plans, or says something ambiguous like "that project" or "what did we decide." Skip it for greetings, quick reactions, general knowledge, and simple back-and-forth where the provided profile/facts/current conversation are enough.
 
-Never pretend to remember something that is not in the provided profile, facts, current conversation, or search_memory results. If memory is missing, ask a quick clarifying question.`;
+Never pretend to remember something that is not in the provided profile, facts, current conversation, or search_memory results. If memory is missing, ask a quick clarifying question.`,
+    keyterms: buildSttKeyterms([...keytermSources, customRules, profile, ...factTexts]),
+  };
 }
 
 function normalizeHostedModelName(model: string) {
@@ -498,10 +634,16 @@ async function buildConfig(body: VoiceAgentRequest) {
   const voiceModel = normalizeVoiceAgentVoice(voiceSetting);
   const voiceSpeed = normalizeVoiceAgentSpeed(speedSetting);
   const voiceStyle = normalizeVoiceAgentStyle(styleSetting);
-  const prompt = await buildVoicePrompt(
+  const promptContext = await buildVoicePromptContext(
     privateMode,
     resolveVoiceAgentStyle(voiceStyle),
-    buildPronunciationGuidance(pronunciationSetting)
+    buildPronunciationGuidance(pronunciationSetting),
+    [
+      thinkSelection.label,
+      thinkSelection.model,
+      voiceModel,
+      pronunciationSetting,
+    ]
   );
 
   const history = recentHistory(body.messages);
@@ -524,8 +666,14 @@ async function buildConfig(body: VoiceAgentRequest) {
           },
         },
       ];
-  const thinkChain = buildThinkChain(thinkSelection, prompt, functions);
+  const thinkChain = buildThinkChain(thinkSelection, promptContext.prompt, functions);
   const speakChain = buildSpeakChain(voiceModel, voiceSpeed);
+  const listenProvider = {
+    type: "deepgram",
+    version: VOICE_AGENT_LISTEN_PROVIDER_VERSION,
+    model: VOICE_AGENT_LISTEN_MODEL,
+    ...(promptContext.keyterms.length > 0 ? { keyterms: promptContext.keyterms } : {}),
+  };
 
   const settings = {
     type: "Settings",
@@ -547,11 +695,7 @@ async function buildConfig(body: VoiceAgentRequest) {
     agent: {
       ...(history.length > 0 ? { context: { messages: history } } : {}),
       listen: {
-        provider: {
-          type: "deepgram",
-          version: VOICE_AGENT_LISTEN_PROVIDER_VERSION,
-          model: VOICE_AGENT_LISTEN_MODEL,
-        },
+        provider: listenProvider,
       },
       think: thinkChain,
       speak: speakChain,
@@ -574,6 +718,7 @@ async function buildConfig(body: VoiceAgentRequest) {
       ),
       listenModel: VOICE_AGENT_LISTEN_MODEL,
       listenModelLabel: VOICE_AGENT_LISTEN_MODEL_LABEL,
+      listenKeyterms: promptContext.keyterms,
       voiceModel,
       voiceFallbackModel: speakChain[1]?.provider.model || null,
       voiceSpeed,
