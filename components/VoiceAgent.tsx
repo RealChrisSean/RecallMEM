@@ -8,6 +8,9 @@ import {
   VOICE_OUTPUT_SAMPLE_RATE,
 } from "@/lib/voice-audio";
 
+const MEMORY_FILLER_DELAY_MS = 450;
+const MEMORY_FILLER_MESSAGE = "Let me check your memory for that.";
+
 type VoiceStatus =
   | "connecting"
   | "listening"
@@ -147,6 +150,21 @@ export default function VoiceAgent({
     setStatus("speaking");
   }
 
+  function sendJsonMessage(payload: Record<string, unknown>) {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(payload));
+    return true;
+  }
+
+  function injectAgentMessage(message: string) {
+    sendJsonMessage({
+      type: "InjectAgentMessage",
+      behavior: "queue",
+      message,
+    });
+  }
+
   async function saveMessages(nextMessages: Message[]) {
     if (nextMessages.length === 0 || nextMessages.length === lastSavedLengthRef.current) {
       return;
@@ -217,7 +235,11 @@ export default function VoiceAgent({
           }
 
           let content = "Memory search failed. Answer based on the current conversation.";
+          let fillerTimer: ReturnType<typeof setTimeout> | null = null;
           if (fn.name === "search_memory" && args.query?.trim()) {
+            fillerTimer = setTimeout(() => {
+              injectAgentMessage(MEMORY_FILLER_MESSAGE);
+            }, MEMORY_FILLER_DELAY_MS);
             try {
               const res = await fetch("/api/voice-agent/memory", {
                 method: "POST",
@@ -237,17 +259,17 @@ export default function VoiceAgent({
               });
             } catch (err) {
               console.error("[voice-agent] memory search failed:", err);
+            } finally {
+              if (fillerTimer) clearTimeout(fillerTimer);
             }
           }
 
-          ws.send(
-            JSON.stringify({
-              type: "FunctionCallResponse",
-              id: fn.id,
-              name: fn.name,
-              content,
-            })
-          );
+          sendJsonMessage({
+            type: "FunctionCallResponse",
+            id: fn.id,
+            name: fn.name,
+            content,
+          });
         })
     );
   }
@@ -392,6 +414,10 @@ export default function VoiceAgent({
 
           case "Warning":
             console.warn("[voice-agent] warning:", msg);
+            break;
+
+          case "InjectionRefused":
+            // Expected if the user is mid-turn; the filler is best-effort.
             break;
 
           case "Error":

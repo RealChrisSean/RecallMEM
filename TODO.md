@@ -18,7 +18,14 @@ Planned voice-agent upgrades:
 - [x] **Evaluate Deepgram Browser Agent SDK pieces.** Adopt `@deepgram/agents` for microphone capture and PCM playback while keeping RecallMEM's custom WebSocket/session bridge for auth fallback, memory tool calls, and chat persistence.
 - [x] **Add LLM and TTS fallback chains.** Configure voice-agent `think` and `speak` providers as ordered fallback arrays so transient model/provider failures do not kill the live voice session.
 - [x] **Add Deepgram voice settings.** Let users choose voice, speaking speed, and speaking style in Settings, with pronunciation guidance for app-specific terms like `RecallMEM`, `pgvector`, `Fly.io`, model names, and user names.
-- [ ] **Add dead-air filler during memory/tool calls.** Use Deepgram agent message injection to say short status lines like "Let me check your memory for that" while memory search or tools are running.
+- [ ] **Add model-mode support for text chat.** Let users choose richer chat model modes without making voice slow:
+  - OpenAI chat modes: `GPT-5.5 Instant` (`gpt-5.5` with lowest/none reasoning), `GPT-5.5 Thinking` (`gpt-5.5` with medium/high reasoning), `GPT-5.5 Deep` (`gpt-5.5` with `xhigh` reasoning), and `GPT-5.5 Pro` (`gpt-5.5-pro`, text chat only because it can take minutes).
+  - Anthropic chat modes: `Claude Opus 4.7 Instant` (omit `thinking`), `Claude Opus 4.7 Adaptive` (`thinking: { type: "adaptive" }`), and adaptive low/medium/high/xhigh via `output_config.effort`.
+  - Add model metadata for `supportsChat`, `supportsVoice`, `supportsReasoning`, provider mode, and whether a mode needs the OpenAI Responses API.
+  - Add an OpenAI Responses API path for GPT reasoning/pro modes.
+  - Add Anthropic adaptive thinking support in the native Messages API path.
+  - Force Voice Agent to use the fastest compatible voice model even when text chat is set to Pro or deep/adaptive reasoning.
+- [x] **Add dead-air filler during memory/tool calls.** Use Deepgram agent message injection to say short status lines like "Let me check your memory for that" while memory search or tools are running.
 - [ ] **Feed memory keyterms into STT.** Pull names, projects, model IDs, companies, and weird exact phrases from RecallMEM memory into Deepgram keyterms so voice transcription catches important terms more reliably.
 - [ ] **Audit audio output quality.** Verify output encoding, sample rate, playback buffer handling, and raw PCM/container settings so voice playback avoids static, clicks, overlap, and phone-call quality.
 - [ ] **Add multilingual/code-switching mode.** Support Deepgram multilingual Flux where appropriate, while documenting that first-party Filipino/Tagalog Aura voice support may require prompt tuning or another TTS provider.
