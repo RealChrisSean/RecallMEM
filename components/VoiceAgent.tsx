@@ -153,6 +153,10 @@ export default function VoiceAgent({
     playerRef.current?.interrupt();
   }
 
+  function allowNextAgentAudio() {
+    dropAudioUntilNextAgentSpeechRef.current = false;
+  }
+
   function playPcm16(arrayBuffer: ArrayBuffer) {
     if (dropAudioUntilNextAgentSpeechRef.current) return;
     const payload = extractLinear16Payload(arrayBuffer);
@@ -414,6 +418,7 @@ export default function VoiceAgent({
             break;
 
           case "AgentThinking":
+            allowNextAgentAudio();
             setStatus("thinking");
             break;
 
@@ -428,6 +433,9 @@ export default function VoiceAgent({
             const role = msg.role as "user" | "assistant" | undefined;
             const content = msg.content as string | undefined;
             if (role === "user" || role === "assistant") {
+              if (role === "assistant") {
+                allowNextAgentAudio();
+              }
               appendConversationText(role, content || "");
               setStatus(role === "user" ? "thinking" : "speaking");
             }
