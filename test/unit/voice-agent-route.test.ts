@@ -131,7 +131,7 @@ describe("voice-agent route", () => {
       id: "provider-anthropic",
       label: "Claude",
       type: "anthropic",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
       base_url: "https://api.anthropic.com",
       api_key: "secret",
       user_id: "local-user",
@@ -141,17 +141,17 @@ describe("voice-agent route", () => {
     const res = await POST(
       request({
         providerId: "provider-anthropic",
-        model: "claude-opus-4-7",
+        model: "claude-opus-4-8",
         messages: [],
       })
     );
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.thinkModelLabel).toBe("claude-opus-4-7 via Anthropic");
+    expect(body.thinkModelLabel).toBe("claude-opus-4-8 via Anthropic");
     expect(body.settings.agent.think[0].provider).toEqual({
       type: "anthropic",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
     });
     expect(body.settings.agent.think[1].provider).toEqual({
       type: "anthropic",

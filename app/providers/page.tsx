@@ -33,10 +33,10 @@ const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
 
 const PRESET_HINTS: Record<ProviderType, string> = {
   ollama: "e.g. gemma4:26b, llama3:70b",
-  anthropic: "e.g. claude-opus-4-6, claude-sonnet-4-6",
+  anthropic: "e.g. claude-opus-4-8, claude-sonnet-4-6",
   openai: "e.g. gpt-5.5, gpt-5.4-mini",
   "openai-compatible":
-    "e.g. llama-3.3-70b-versatile, mixtral-8x22b, anthropic/claude-opus-4-6",
+    "e.g. llama-3.3-70b-versatile, mixtral-8x22b, anthropic/claude-opus-4.8",
 };
 
 // Curated list of known models per provider type. The user picks the friendly
@@ -49,6 +49,7 @@ interface KnownModel {
 
 const KNOWN_MODELS: Partial<Record<ProviderType, KnownModel[]>> = {
   anthropic: [
+    { label: "Claude Opus 4.8", apiId: "claude-opus-4-8" },
     { label: "Claude Opus 4.7", apiId: "claude-opus-4-7" },
     { label: "Claude Opus 4.6", apiId: "claude-opus-4-6" },
     { label: "Claude Sonnet 4.6", apiId: "claude-sonnet-4-6" },

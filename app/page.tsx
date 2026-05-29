@@ -3224,6 +3224,7 @@ function ModeToggle({
 // in the group. User picks any model from the dropdown.
 const PROVIDER_MODELS: Record<string, { label: string; apiId: string; pricing?: string }[]> = {
   anthropic: [
+    { label: "Claude Opus 4.8", apiId: "claude-opus-4-8", pricing: "$5/$25 per 1M tok" },
     { label: "Claude Opus 4.7", apiId: "claude-opus-4-7", pricing: "$5/$25 per 1M tok" },
     { label: "Claude Opus 4.6", apiId: "claude-opus-4-6", pricing: "$5/$25 per 1M tok" },
     { label: "Claude Sonnet 4.6", apiId: "claude-sonnet-4-6", pricing: "$3/$15 per 1M tok" },

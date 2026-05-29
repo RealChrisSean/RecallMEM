@@ -20,16 +20,22 @@ Planned voice-agent upgrades:
 - [x] **Add Deepgram voice settings.** Let users choose voice, speaking speed, and speaking style in Settings, with pronunciation guidance for app-specific terms like `RecallMEM`, `pgvector`, `Fly.io`, model names, and user names.
 - [ ] **Add model-mode support for text chat.** Let users choose richer chat model modes without making voice slow:
   - OpenAI chat modes: `GPT-5.5 Instant` (`gpt-5.5` with lowest/none reasoning), `GPT-5.5 Thinking` (`gpt-5.5` with medium/high reasoning), `GPT-5.5 Deep` (`gpt-5.5` with `xhigh` reasoning), and `GPT-5.5 Pro` (`gpt-5.5-pro`, text chat only because it can take minutes).
-  - Anthropic chat modes: `Claude Opus 4.7 Instant` (omit `thinking`), `Claude Opus 4.7 Adaptive` (`thinking: { type: "adaptive" }`), and adaptive low/medium/high/xhigh via `output_config.effort`.
+  - Anthropic chat modes: `Claude Opus 4.8 Instant` (omit `thinking`), `Claude Opus 4.8 Adaptive` (`thinking: { type: "adaptive" }`), and adaptive low/medium/high/xhigh via `output_config.effort`.
   - Add model metadata for `supportsChat`, `supportsVoice`, `supportsReasoning`, provider mode, and whether a mode needs the OpenAI Responses API.
   - Add an OpenAI Responses API path for GPT reasoning/pro modes.
   - Add Anthropic adaptive thinking support in the native Messages API path.
   - Force Voice Agent to use the fastest compatible voice model even when text chat is set to Pro or deep/adaptive reasoning.
 - [x] **Add dead-air filler during memory/tool calls.** Use Deepgram agent message injection to say short status lines like "Let me check your memory for that" while memory search or tools are running.
 - [x] **Feed memory keyterms into STT.** Pull names, projects, model IDs, companies, and weird exact phrases from RecallMEM memory into Deepgram keyterms so voice transcription catches important terms more reliably.
-- [ ] **Audit audio output quality.** Verify output encoding, sample rate, playback buffer handling, and raw PCM/container settings so voice playback avoids static, clicks, overlap, and phone-call quality.
+- [x] **Audit audio output quality.** Verify output encoding, sample rate, playback buffer handling, and raw PCM/container settings so voice playback avoids static, clicks, overlap, and phone-call quality.
 - [ ] **Add multilingual/code-switching mode.** Support Deepgram multilingual Flux where appropriate, while documenting that first-party Filipino/Tagalog Aura voice support may require prompt tuning or another TTS provider.
 - [ ] **Skip diarization for the live agent for now.** Diarization v2 is useful for recorded multi-speaker audio, but it is not a priority for our current one-person live voice-agent flow.
+
+---
+
+## Repo safety roadmap
+
+- [ ] **Add secret/data leak prevention.** Add a `gitleaks` config, local pre-commit/pre-push checks, and a GitHub Action so API keys, database URLs, dumps, private notes, and other sensitive files are blocked before they can reach GitHub. Keep Sprite deploys based on `git ls-files` so ignored files like `.env.local`, `DEVLOG.md`, local DB data, `.next`, and `node_modules` never upload.
 
 ---
 
@@ -160,3 +166,9 @@ Building blocks that are already working in v0.1:
 - [x] Apache 2.0 license + NOTICE for third-party attributions
 - [x] Comprehensive README with comparison table, mermaid diagrams, hardware tiers
 - [x] CONTRIBUTING.md for developers
+
+---
+
+## Hosted always-on roadmap
+
+- [ ] **Move daily-use RecallMEM to an always-on Fly Machine.** Avoid automatic two-way database sync between local and Sprite for now because that becomes conflict resolution, tombstones, embedding-provider drift, and settings/secrets replication. Instead, make one hosted Postgres/pgvector-backed app the daily source of truth, keep localhost for development/testing, run migrations on deploy, store secrets with `fly secrets`, add backups/export, and add app auth before any public exposure.

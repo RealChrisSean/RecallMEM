@@ -50,7 +50,7 @@ describe("voice-agent save route", () => {
       request({
         chatId: "chat-1",
         providerId: "provider-anthropic",
-        model: "claude-opus-4-7",
+        model: "claude-opus-4-8",
         messages: [
           { role: "user", content: "Hey" },
           { role: "assistant", content: "Hey, I'm here." },
@@ -67,7 +67,7 @@ describe("voice-agent save route", () => {
       ],
       {
         providerId: "provider-anthropic",
-        model: "claude-opus-4-7",
+        model: "claude-opus-4-8",
       }
     );
   });

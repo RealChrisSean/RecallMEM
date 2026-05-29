@@ -6,6 +6,7 @@ import type { Message } from "@/lib/types";
 import {
   VOICE_INPUT_SAMPLE_RATE,
   VOICE_OUTPUT_SAMPLE_RATE,
+  extractLinear16Payload,
 } from "@/lib/voice-audio";
 
 const MEMORY_FILLER_DELAY_MS = 450;
@@ -90,6 +91,8 @@ export default function VoiceAgent({
   const lastConversationTextRef = useRef("");
   const itemCounterRef = useRef(0);
   const micMutedRef = useRef(false);
+  const dropAudioUntilNextAgentSpeechRef = useRef(false);
+  const playbackDoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     chatIdRef.current = chatId;
@@ -137,17 +140,41 @@ export default function VoiceAgent({
     return `Aura-2 ${name.charAt(0).toUpperCase()}${name.slice(1)}`;
   }
 
-  function stopPlayback() {
+  function clearPlaybackDoneTimer() {
+    if (playbackDoneTimerRef.current) {
+      clearTimeout(playbackDoneTimerRef.current);
+      playbackDoneTimerRef.current = null;
+    }
+  }
+
+  function stopPlayback(dropIncomingAudio = false) {
+    clearPlaybackDoneTimer();
+    dropAudioUntilNextAgentSpeechRef.current = dropIncomingAudio;
     playerRef.current?.interrupt();
   }
 
   function playPcm16(arrayBuffer: ArrayBuffer) {
-    if (arrayBuffer.byteLength === 0) return;
+    if (dropAudioUntilNextAgentSpeechRef.current) return;
+    const payload = extractLinear16Payload(arrayBuffer);
+    if (!payload) return;
     const player =
       playerRef.current || new AgentPlayer({ sampleRate: VOICE_OUTPUT_SAMPLE_RATE });
     playerRef.current = player;
-    player.queue(arrayBuffer);
+    player.queue(payload);
     setStatus("speaking");
+  }
+
+  function markListeningWhenPlaybackDrains() {
+    clearPlaybackDoneTimer();
+    const remainingSeconds = playerRef.current?.getRemainingPlaybackTime() ?? 0;
+    if (remainingSeconds <= 0.05) {
+      setStatus("listening");
+      return;
+    }
+    playbackDoneTimerRef.current = setTimeout(() => {
+      playbackDoneTimerRef.current = null;
+      setStatus("listening");
+    }, Math.ceil(remainingSeconds * 1000));
   }
 
   function sendJsonMessage(payload: Record<string, unknown>) {
@@ -382,12 +409,19 @@ export default function VoiceAgent({
             break;
 
           case "UserStartedSpeaking":
-            stopPlayback();
+            stopPlayback(true);
             setStatus("listening");
             break;
 
           case "AgentThinking":
             setStatus("thinking");
+            break;
+
+          case "AgentStartedSpeaking":
+            // Start each assistant turn with a fresh queue so late chunks from
+            // an interrupted turn cannot overlap the new response.
+            stopPlayback(false);
+            setStatus("speaking");
             break;
 
           case "ConversationText": {
@@ -409,7 +443,7 @@ export default function VoiceAgent({
           }
 
           case "AgentAudioDone":
-            setStatus("listening");
+            markListeningWhenPlaybackDrains();
             break;
 
           case "Warning":
@@ -462,6 +496,8 @@ export default function VoiceAgent({
       clearInterval(keepAliveRef.current);
       keepAliveRef.current = null;
     }
+    clearPlaybackDoneTimer();
+    dropAudioUntilNextAgentSpeechRef.current = false;
     settingsAppliedRef.current = false;
     microphoneRef.current?.stop();
     microphoneRef.current = null;

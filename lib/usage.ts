@@ -4,6 +4,7 @@ import { query, getBaseUserId } from "@/lib/db";
 // Falls back to provider-level defaults if model not found.
 const MODEL_PRICING: Record<string, { in: number; out: number }> = {
   // Anthropic
+  "claude-opus-4-8":             { in: 500,  out: 2500 },  // $5/$25
   "claude-opus-4-7":             { in: 500,  out: 2500 },  // $5/$25
   "claude-opus-4-6":             { in: 500,  out: 2500 },  // $5/$25
   "claude-opus-4-5":             { in: 500,  out: 2500 },

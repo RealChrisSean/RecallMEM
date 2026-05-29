@@ -23,6 +23,44 @@ export function pcm16ToFloat32(buffer: ArrayBuffer): Float32Array {
   return float32;
 }
 
+function readAscii(view: DataView, offset: number, length: number) {
+  if (offset + length > view.byteLength) return "";
+  let value = "";
+  for (let i = 0; i < length; i++) {
+    value += String.fromCharCode(view.getUint8(offset + i));
+  }
+  return value;
+}
+
+function evenLengthSlice(buffer: ArrayBuffer, byteLength = buffer.byteLength) {
+  const safeLength = byteLength - (byteLength % 2);
+  if (safeLength <= 0) return null;
+  if (safeLength === buffer.byteLength) return buffer;
+  return buffer.slice(0, safeLength);
+}
+
+export function extractLinear16Payload(buffer: ArrayBuffer): ArrayBuffer | null {
+  if (buffer.byteLength < 2) return null;
+  const view = new DataView(buffer);
+
+  if (readAscii(view, 0, 4) === "RIFF" && readAscii(view, 8, 4) === "WAVE") {
+    let offset = 12;
+    while (offset + 8 <= view.byteLength) {
+      const chunkId = readAscii(view, offset, 4);
+      const chunkSize = view.getUint32(offset + 4, true);
+      const dataStart = offset + 8;
+      const dataEnd = Math.min(dataStart + chunkSize, view.byteLength);
+      if (chunkId === "data") {
+        return evenLengthSlice(buffer.slice(dataStart, dataEnd));
+      }
+      offset = dataStart + chunkSize + (chunkSize % 2);
+    }
+    return null;
+  }
+
+  return evenLengthSlice(buffer);
+}
+
 export function resampleLinear(
   input: Float32Array,
   fromRate: number,
