@@ -24,6 +24,10 @@
     "publish:pack": "npm run publish:sync && cd publish && npm pack",
     "publish:dry": "npm run publish:sync && cd publish && npm publish --dry-run",
     "publish:npm": "npm run publish:sync && cd publish && npm publish --access public",
+    "security:install-hooks": "bash scripts/security/install-git-hooks.sh",
+    "security:paths": "bash scripts/security/check-sensitive-paths.sh --all",
+    "security:secrets": "bash scripts/security/check-secrets.sh --all",
+    "security:staged": "bash scripts/security/check-secrets.sh --staged",
     "test": "vitest run",
     "test:watch": "vitest"
   },

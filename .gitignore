@@ -51,6 +51,7 @@ backup.sql
 **/exports/
 **/personal-data/
 .claude/
+.gitleaks-report.*
 
 # Personal notes / agent context - never commit
 DEVLOG.md

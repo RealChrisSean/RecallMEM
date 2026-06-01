@@ -35,7 +35,7 @@ Planned voice-agent upgrades:
 
 ## Repo safety roadmap
 
-- [ ] **Add secret/data leak prevention.** Add a `gitleaks` config, local pre-commit/pre-push checks, and a GitHub Action so API keys, database URLs, dumps, private notes, and other sensitive files are blocked before they can reach GitHub. Keep Sprite deploys based on `git ls-files` so ignored files like `.env.local`, `DEVLOG.md`, local DB data, `.next`, and `node_modules` never upload.
+- [x] **Add secret/data leak prevention.** Add a `gitleaks` config, local pre-commit/pre-push checks, and a GitHub Action so API keys, database URLs, dumps, private notes, and other sensitive files are blocked before they can reach GitHub. Keep Sprite deploys based on `git ls-files` so ignored files like `.env.local`, `DEVLOG.md`, local DB data, `.next`, and `node_modules` never upload.
 
 ---
 

@@ -1,0 +1,57 @@
+title = "RecallMEM secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "recallmem-provider-secret-assignment"
+description = "Provider API keys and tokens assigned in source or config"
+regex = '''(?i)\b(?:OPENAI|ANTHROPIC|DEEPGRAM|XAI|GROK|LUMA|LANGFUSE|GITHUB|FLY|SPRITE|SUPABASE|NEON|TIDB|DATABASE|POSTGRES|PG)[A-Z0-9_]*(?:API[_-]?KEY|AUTH[_-]?TOKEN|ACCESS[_-]?TOKEN|SECRET|PRIVATE[_-]?KEY|CLIENT[_-]?SECRET|PASSWORD|PASS)\b\s*[:=]\s*['"]?([A-Za-z0-9_./+=:-]{16,})'''
+keywords = [
+  "api_key",
+  "API_KEY",
+  "access_token",
+  "ACCESS_TOKEN",
+  "secret",
+  "SECRET",
+  "password",
+  "PASSWORD",
+]
+
+[[rules]]
+id = "recallmem-postgres-url"
+description = "Postgres connection URLs should never be committed"
+regex = '''(?i)\bpostgres(?:ql)?://[A-Za-z0-9._~%!$&'()*+,;=:-]+:[A-Za-z0-9._~%!$&'()*+,;=:-]+@[A-Za-z0-9._~%!$&'()*+,;=:-]+/[A-Za-z0-9._~%!$&'()*+,;=:-]+'''
+keywords = [
+  "postgres://",
+  "postgresql://",
+]
+
+[[rules]]
+id = "recallmem-npm-token"
+description = "npm access token"
+regex = '''npm_[A-Za-z0-9]{36,}'''
+keywords = [
+  "npm_",
+]
+
+[[rules]]
+id = "recallmem-fly-token"
+description = "Fly.io org token"
+regex = '''FlyV1 [A-Za-z0-9+/=_-]{40,}'''
+keywords = [
+  "FlyV1",
+]
+
+[[allowlists]]
+description = "Safe examples and generated dependency metadata"
+paths = [
+  '''(^|/)package-lock\.json$''',
+  '''(^|/)docs/.*\.md$''',
+  '''(^|/)README\.md$''',
+  '''(^|/)TODO\.md$''',
+]
+regexes = [
+  '''postgresql://user:password@localhost:5432/recallmem''',
+  '''npm_[A-Z0-9_]{10,}''',
+]
