@@ -64,8 +64,8 @@ You can run it three ways:
 - **Multiple brains** for isolated memory namespaces (work, personal, demo, etc). Each brain has its own chats, facts, and profile. Stored in Postgres, not localStorage.
 - **Memory inspector** where you can view, edit, or delete every fact
 - **Vector search** across past conversations and facts with dated recall
-- **Voice input (STT)** via Deepgram Nova-3 or local Whisper. Idle mic timeout after 60s of silence.
-- **Text-to-speech (TTS)** via xAI Grok, OpenAI HD, Deepgram Aura-2, or free browser voice. Chunked playback for instant start on long responses.
+- **Live Deepgram Voice Agent** with Flux listening, cloud-LLM thinking, Aura-2 speech, memory tool calls, and voice turns saved back into the same chat/memory pipeline as text.
+- **Voice input + TTS** for normal chat: dictate into the composer, or have assistant messages read aloud through Deepgram Aura-2, xAI Grok, OpenAI HD, or free browser voices.
 - **Custom rules** for how you want the AI to talk to you
 - **File uploads** (images, PDFs, code). PDFs are rendered page-by-page as images so the LLM sees charts and diagrams, not just extracted text.
 - **Web search** when using Anthropic or Ollama (via Brave Search)
@@ -183,7 +183,7 @@ Wire in your own auth with two calls at startup and every lib function respects 
 
 ## Limitations (v0.2)
 
-No multi-user. No mobile app. Reasoning models (o1/o3, extended thinking) may have edge cases. Fact supersession is LLM-judged and intentionally conservative. See the [full limitations list](./docs/LIMITATIONS.md).
+No multi-user auth layer. No native mobile app. Live voice needs a Deepgram key and a fast supported cloud model. GPT Pro/deep and Claude adaptive modes are text-chat features, while Voice Agent keeps itself on fast compatible models. Fact supersession is LLM-judged and intentionally conservative. See the [full limitations list](./docs/LIMITATIONS.md).
 
 ## Contributing
 
@@ -195,7 +195,7 @@ Apache 2.0. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE). Use it, modify it, 
 
 ## Status
 
-v0.2.0. It works. I use it every day.
+v0.2.3. It works. I use it every day.
 
 I built RecallMEM because I wanted an AI that actually knows me. Not because I'm paranoid about privacy (though that's a nice bonus). The chat models you use today forget you the second you close the tab and that drives me crazy. So I fixed it.
 

@@ -1,14 +1,14 @@
-# Honest limitations (v0.1)
+# Honest limitations (v0.2)
 
-This is v0.1. It works, used daily, but it's not "production ready" in the corporate sense. Here's the honest list of what doesn't work yet, what's intentionally limited, and what's just rough.
+This is v0.2. It works, gets used daily, and now includes memory-backed voice. It is still not "production ready" in the corporate sense. Here's the honest list of what doesn't work yet, what's intentionally limited, and what's just rough.
 
 ## What doesn't exist yet
 
-**No voice yet.** It's text only. Whisper for speech-to-text and Piper for text-to-speech (both local) are on the roadmap.
+**No multi-user auth layer.** RecallMEM is still designed as a personal app. Sprite can protect the whole app behind Sprite login, but the app itself does not yet have per-user accounts, sessions, or row-level authorization.
 
-**No mobile app.** It's a web app you run locally. You access it from your browser at `localhost:1337`. A native iOS/Android app is theoretically possible but it's a separate project.
+**No native mobile app.** The web UI is mobile-friendly enough for daily use, but there is no iOS or Android app. A native app is a separate project.
 
-**No multi-user.** This is a personal app for one person on one machine. If you want a multi-user version, that's a separate fork.
+**No local real-time voice stack.** The live voice agent uses Deepgram Voice Agent. Normal local chat can use Ollama/Gemma, but local Gemma/Ollama is intentionally disabled for the live voice agent because it is too slow for a phone-call-style loop.
 
 **No CI, no error monitoring, no SLA.** There's a small Vitest test suite that covers the deterministic memory primitives (keyword routing, inflection, regression cases), but it's intentionally narrow.
 
@@ -19,9 +19,11 @@ This is v0.1. It works, used daily, but it's not "production ready" in the corpo
 - Ollama (Gemma) uses **Brave Search** as a backend, which needs an API key (~5 minute setup): sign up at [brave.com/search/api](https://brave.com/search/api), pick the Search plan ($5/1,000 requests, includes $5 free credits every month so ~1,000 searches/month are free), and paste the key into Settings → Web search.
 - OpenAI's native web search requires the Responses API path which isn't plumbed through yet.
 
-**OpenAI vision isn't fully wired up.** Gemma 4 (4B and up) handles images natively via Ollama. OpenAI uses a different format that hasn't been plumbed through. Use Ollama or Anthropic for images.
+**Voice Agent provider support depends on Deepgram.** The live agent can use compatible cloud providers through Deepgram's `think` provider path. If a selected chat model is local, too slow, or unsupported by Deepgram, RecallMEM falls back to a fast compatible voice model instead of trying to run that exact chat configuration live.
 
-**Reasoning models (OpenAI o1/o3, Claude extended thinking) might have edge cases.** They use different API parameters that aren't fully handled yet. Standard chat models work fine.
+**Reasoning/pro modes are text-chat first.** GPT instant/thinking/deep/pro and Claude Opus 4.8 instant/adaptive are selectable in chat. Voice Agent intentionally keeps itself on fast compatible models, so it will not run a minutes-long GPT Pro or deep/adaptive thinking loop during live speech.
+
+**OpenAI vision isn't fully wired up.** Gemma 4 (4B and up) handles images natively via Ollama. OpenAI uses a different format that hasn't been plumbed through. Use Ollama or Anthropic for images.
 
 **Auto-install is Mac-only.** The `npx recallmem` installer auto-installs Postgres, pgvector, Ollama, and pulls models on Mac via Homebrew. On Linux, it prints clear manual steps and exits.
 
@@ -39,6 +41,7 @@ This is v0.1. It works, used daily, but it's not "production ready" in the corpo
 - **Database:** Postgres 17 + pgvector (HNSW vector indexes)
 - **Local LLM:** Ollama with Gemma 4 (E2B / E4B / 26B MoE / 31B Dense)
 - **Embeddings:** EmbeddingGemma 300M (768 dimensions, runs in Ollama)
+- **Voice Agent:** Deepgram Voice Agent with Flux listening and Aura-2 speech
 - **PDF parsing:** pdf-parse v2
 - **Markdown rendering:** react-markdown + remark-gfm + @tailwindcss/typography
 - **Cloud LLM transports (optional):** Anthropic Messages API, OpenAI Chat Completions, OpenAI-compatible

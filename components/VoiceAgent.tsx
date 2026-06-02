@@ -3,6 +3,7 @@
 import { AgentMicrophone, AgentPlayer } from "@deepgram/agents";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message } from "@/lib/types";
+import type { ProviderModelMode } from "@/lib/llm-config";
 import {
   VOICE_INPUT_SAMPLE_RATE,
   VOICE_OUTPUT_SAMPLE_RATE,
@@ -25,6 +26,7 @@ interface VoiceAgentProps {
   privateMode: boolean;
   providerId: string | null;
   selectedModel: string | null;
+  selectedModelMode?: ProviderModelMode;
   onSaved: (chatId: string, messages: Message[]) => void;
   onClose: () => void;
 }
@@ -63,6 +65,7 @@ export default function VoiceAgent({
   privateMode,
   providerId,
   selectedModel,
+  selectedModelMode,
   onSaved,
   onClose,
 }: VoiceAgentProps) {
@@ -322,6 +325,7 @@ export default function VoiceAgent({
           privateMode,
           providerId,
           model: selectedModel,
+          modelMode: selectedModelMode,
         }),
       });
 

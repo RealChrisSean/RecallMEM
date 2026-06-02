@@ -5,7 +5,13 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ModelMode, Message, AttachedFile } from "@/lib/types";
-import { MODEL_OPTIONS, type ModelId } from "@/lib/llm-config";
+import {
+  DEFAULT_PROVIDER_MODEL_MODE,
+  MODEL_OPTIONS,
+  isProviderModelMode,
+  type ModelId,
+  type ProviderModelMode,
+} from "@/lib/llm-config";
 import { AppFooter } from "@/components/AppFooter";
 import { Logo } from "@/components/Logo";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -101,6 +107,8 @@ export default function ChatPage() {
   const [selectedModel, setSelectedModel] = useState<ModelId>(DEFAULT_MODEL);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const [selectedProviderModel, setSelectedProviderModel] = useState<string | null>(null);
+  const [selectedProviderModelMode, setSelectedProviderModelMode] =
+    useState<ProviderModelMode>(DEFAULT_PROVIDER_MODEL_MODE);
   const [customProviders, setCustomProviders] = useState<ProviderListItem[]>([]);
   const [providersLoaded, setProvidersLoaded] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -821,16 +829,21 @@ export default function ChatPage() {
   }
 
   // Load the saved model selection on mount.
-  // Format: "ollama:<modelId>" or "provider:<providerId>::<modelId>"
+  // Format: "ollama:<modelId>" or "provider:<providerId>::<modelId>::<mode>"
   useEffect(() => {
     const saved = localStorage.getItem(MODEL_STORAGE_KEY);
     if (!saved) return;
     if (saved.startsWith("provider:")) {
       const rest = saved.slice("provider:".length);
-      const sep = rest.indexOf("::");
-      if (sep !== -1) {
-        setSelectedProviderId(rest.slice(0, sep));
-        setSelectedProviderModel(rest.slice(sep + 2));
+      const [providerId, model, modelMode] = rest.split("::");
+      if (providerId) {
+        setSelectedProviderId(providerId);
+        if (model) setSelectedProviderModel(model);
+        setSelectedProviderModelMode(
+          isProviderModelMode(modelMode)
+            ? modelMode
+            : DEFAULT_PROVIDER_MODEL_MODE
+        );
       } else {
         setSelectedProviderId(rest);
       }
@@ -848,11 +861,12 @@ export default function ChatPage() {
   useEffect(() => {
     if (selectedProviderId) {
       const model = selectedProviderModel ? `::${selectedProviderModel}` : "";
-      localStorage.setItem(MODEL_STORAGE_KEY, `provider:${selectedProviderId}${model}`);
+      const modelMode = selectedProviderModel ? `::${selectedProviderModelMode}` : "";
+      localStorage.setItem(MODEL_STORAGE_KEY, `provider:${selectedProviderId}${model}${modelMode}`);
     } else {
       localStorage.setItem(MODEL_STORAGE_KEY, `ollama:${selectedModel}`);
     }
-  }, [selectedModel, selectedProviderId, selectedProviderModel]);
+  }, [selectedModel, selectedProviderId, selectedProviderModel, selectedProviderModelMode]);
 
   // Close modals on Escape key
   useEffect(() => {
@@ -916,6 +930,8 @@ export default function ChatPage() {
     if (installedOllamaModels.has(id)) {
       setSelectedModel(id);
       setSelectedProviderId(null);
+      setSelectedProviderModel(null);
+      setSelectedProviderModelMode(DEFAULT_PROVIDER_MODEL_MODE);
     } else {
       setPendingDownloadModel(id);
       setDownloadProgress(null);
@@ -964,6 +980,8 @@ export default function ChatPage() {
             await refreshInstalledModels();
             setSelectedModel(model as ModelId);
             setSelectedProviderId(null);
+            setSelectedProviderModel(null);
+            setSelectedProviderModelMode(DEFAULT_PROVIDER_MODEL_MODE);
             setPendingDownloadModel(null);
             setDownloadProgress(null);
           }
@@ -1012,6 +1030,7 @@ export default function ChatPage() {
     if (!customProviders.some((p) => p.id === selectedProviderId)) {
       setSelectedProviderId(null);
       setSelectedProviderModel(null);
+      setSelectedProviderModelMode(DEFAULT_PROVIDER_MODEL_MODE);
       localStorage.setItem(MODEL_STORAGE_KEY, `ollama:${selectedModel}`);
     }
   }, [customProviders, providersLoaded, selectedModel, selectedProviderId]);
@@ -1352,7 +1371,11 @@ export default function ChatPage() {
         mode,
         chatId,
         ...(selectedProviderId
-          ? { providerId: selectedProviderId, model: selectedProviderModel || undefined }
+          ? {
+              providerId: selectedProviderId,
+              model: selectedProviderModel || undefined,
+              providerModelMode: selectedProviderModelMode,
+            }
           : { model: selectedModel }),
         webSearch,
         thinking: thinkingEnabled,
@@ -1716,10 +1739,12 @@ export default function ChatPage() {
               modelId={selectedModel}
               providerId={selectedProviderId}
               selectedModel={selectedProviderModel}
+              selectedModelMode={selectedProviderModelMode}
               onSelectOllama={handleOllamaSelect}
-              onSelectProvider={(id, model) => {
+              onSelectProvider={(id, model, modelMode) => {
                 setSelectedProviderId(id);
                 setSelectedProviderModel(model || null);
+                setSelectedProviderModelMode(modelMode || DEFAULT_PROVIDER_MODEL_MODE);
               }}
               customProviders={customProviders}
               disabled={isBusy || isFinalizing}
@@ -1946,10 +1971,12 @@ export default function ChatPage() {
               modelId={selectedModel}
               providerId={selectedProviderId}
               selectedModel={selectedProviderModel}
+              selectedModelMode={selectedProviderModelMode}
               onSelectOllama={handleOllamaSelect}
-              onSelectProvider={(id, model) => {
+              onSelectProvider={(id, model, modelMode) => {
                 setSelectedProviderId(id);
                 setSelectedProviderModel(model || null);
+                setSelectedProviderModelMode(modelMode || DEFAULT_PROVIDER_MODEL_MODE);
               }}
               customProviders={customProviders}
               disabled={isBusy || isFinalizing}
@@ -2261,6 +2288,7 @@ export default function ChatPage() {
           privateMode={privateMode}
           providerId={selectedProviderId}
           selectedModel={selectedVoiceModel}
+          selectedModelMode={selectedProviderModelMode}
           onSaved={(savedChatId, savedMessages) => {
             setChatId(savedChatId);
             chatIdRef.current = savedChatId;
@@ -3254,18 +3282,28 @@ function ModeToggle({
 
 // Known models per provider type. One API key unlocks all models
 // in the group. User picks any model from the dropdown.
-const PROVIDER_MODELS: Record<string, { label: string; apiId: string; pricing?: string }[]> = {
+const PROVIDER_MODELS: Record<
+  string,
+  { label: string; apiId: string; pricing?: string; mode?: ProviderModelMode }[]
+> = {
   anthropic: [
-    { label: "Claude Opus 4.8", apiId: "claude-opus-4-8", pricing: "$5/$25 per 1M tok" },
+    { label: "Claude Opus 4.8 Instant", apiId: "claude-opus-4-8", mode: "instant", pricing: "$5/$25 per 1M tok" },
+    { label: "Claude Opus 4.8 Adaptive Low", apiId: "claude-opus-4-8", mode: "anthropic-adaptive-low", pricing: "$5/$25 per 1M tok" },
+    { label: "Claude Opus 4.8 Adaptive Medium", apiId: "claude-opus-4-8", mode: "anthropic-adaptive-medium", pricing: "$5/$25 per 1M tok" },
+    { label: "Claude Opus 4.8 Adaptive High", apiId: "claude-opus-4-8", mode: "anthropic-adaptive-high", pricing: "$5/$25 per 1M tok" },
+    { label: "Claude Opus 4.8 Adaptive XHigh", apiId: "claude-opus-4-8", mode: "anthropic-adaptive-xhigh", pricing: "$5/$25 per 1M tok" },
     { label: "Claude Opus 4.7", apiId: "claude-opus-4-7", pricing: "$5/$25 per 1M tok" },
     { label: "Claude Opus 4.6", apiId: "claude-opus-4-6", pricing: "$5/$25 per 1M tok" },
     { label: "Claude Sonnet 4.6", apiId: "claude-sonnet-4-6", pricing: "$3/$15 per 1M tok" },
     { label: "Claude Haiku 4.5", apiId: "claude-haiku-4-5-20251001", pricing: "$0.80/$4 per 1M tok" },
   ],
   openai: [
-    { label: "GPT-5.5", apiId: "gpt-5.5", pricing: "$5/$30 per 1M tok" },
+    { label: "GPT-5.5 Instant", apiId: "gpt-5.5", mode: "instant", pricing: "$5/$30 per 1M tok" },
+    { label: "GPT-5.5 Thinking", apiId: "gpt-5.5", mode: "openai-thinking", pricing: "$5/$30 per 1M tok" },
+    { label: "GPT-5.5 Deep", apiId: "gpt-5.5", mode: "openai-deep", pricing: "$5/$30 per 1M tok" },
+    { label: "GPT-5.5 Pro", apiId: "gpt-5.5-pro", mode: "openai-pro", pricing: "$30/$180 per 1M tok" },
     { label: "GPT-5.4", apiId: "gpt-5.4", pricing: "$2.50/$15 per 1M tok" },
-    { label: "GPT-5.4 Pro", apiId: "gpt-5.4-pro", pricing: "$30/$180 per 1M tok" },
+    { label: "GPT-5.4 Pro", apiId: "gpt-5.4-pro", mode: "openai-pro", pricing: "$30/$180 per 1M tok" },
     { label: "GPT-5.4 Mini", apiId: "gpt-5.4-mini", pricing: "$0.75/$4.50 per 1M tok" },
     { label: "GPT-5.4 Nano", apiId: "gpt-5.4-nano", pricing: "$0.20/$1.25 per 1M tok" },
     { label: "GPT-5", apiId: "gpt-5", pricing: "$2.50/$15 per 1M tok" },
@@ -3278,6 +3316,7 @@ function ModelPicker({
   modelId,
   providerId,
   selectedModel,
+  selectedModelMode,
   onSelectOllama,
   onSelectProvider,
   customProviders,
@@ -3287,14 +3326,15 @@ function ModelPicker({
   modelId: ModelId;
   providerId: string | null;
   selectedModel: string | null;
+  selectedModelMode: ProviderModelMode;
   onSelectOllama: (id: ModelId) => void;
-  onSelectProvider: (id: string, model?: string) => void;
+  onSelectProvider: (id: string, model?: string, modelMode?: ProviderModelMode) => void;
   customProviders: ProviderListItem[];
   disabled: boolean;
   variant?: "header" | "mobile";
 }) {
   const value = providerId
-    ? `provider:${providerId}::${selectedModel || ""}`
+    ? `provider:${providerId}::${selectedModel || ""}::${selectedModelMode}`
     : `ollama:${modelId}`;
 
   function handleChange(v: string) {
@@ -3304,11 +3344,15 @@ function ModelPicker({
     }
     if (v.startsWith("provider:")) {
       const rest = v.slice("provider:".length);
-      const sep = rest.indexOf("::");
-      if (sep !== -1) {
-        const id = rest.slice(0, sep);
-        const model = rest.slice(sep + 2);
-        onSelectProvider(id, model);
+      const [id, model, modelMode] = rest.split("::");
+      if (id && model) {
+        onSelectProvider(
+          id,
+          model,
+          isProviderModelMode(modelMode)
+            ? modelMode
+            : DEFAULT_PROVIDER_MODEL_MODE
+        );
       } else {
         onSelectProvider(rest);
       }
@@ -3357,7 +3401,10 @@ function ModelPicker({
             return (
               <optgroup key={type} label={label}>
                 {knownModels.map((m) => (
-                  <option key={m.apiId} value={`provider:${provider.id}::${m.apiId}`}>
+                  <option
+                    key={`${m.apiId}:${m.mode || DEFAULT_PROVIDER_MODEL_MODE}`}
+                    value={`provider:${provider.id}::${m.apiId}::${m.mode || DEFAULT_PROVIDER_MODEL_MODE}`}
+                  >
                     {m.label}{m.pricing ? ` — ${m.pricing}` : ""}
                   </option>
                 ))}
@@ -3367,7 +3414,7 @@ function ModelPicker({
           // OpenAI-compatible or unknown type: show the single saved model
           return (
             <optgroup key={provider.id} label={label}>
-              <option value={`provider:${provider.id}::${provider.model}`}>
+              <option value={`provider:${provider.id}::${provider.model}::${DEFAULT_PROVIDER_MODEL_MODE}`}>
                 {provider.label}
               </option>
             </optgroup>

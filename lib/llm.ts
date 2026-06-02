@@ -14,6 +14,7 @@ import {
   type ModelConfig,
   MODEL_OPTIONS,
   type ModelId,
+  type ProviderModelMode,
 } from "@/lib/llm-config";
 
 // Re-export client-safe types and constants for convenience on the server side
@@ -104,6 +105,7 @@ export interface ChatOptions {
   providerId?: string; // if set, route through a custom provider
   webSearch?: boolean; // enable native web search tool (anthropic/openai only)
   thinking?: boolean; // enable thinking/reasoning mode
+  providerModelMode?: ProviderModelMode; // cloud-provider reasoning/adaptive mode
 }
 
 interface ResolvedProvider {
@@ -237,11 +239,11 @@ export async function* chatStream(
   const webSearch = !!options.webSearch && provider.type === "anthropic";
   const thinking = !!options.thinking;
   if (provider.type === "anthropic") {
-    yield* anthropicStream(provider, messages, webSearch);
+    yield* anthropicStream(provider, messages, webSearch, options.providerModelMode);
   } else if (provider.type === "ollama") {
     yield* ollamaStream(provider, messages, thinking);
   } else {
-    yield* openaiStream(provider, messages, webSearch);
+    yield* openaiStream(provider, messages, options.providerModelMode);
   }
 }
 
@@ -303,11 +305,11 @@ export async function chat(
   const provider = await resolveProvider(options);
   let result: string;
   if (provider.type === "anthropic") {
-    result = await anthropicNonStream(provider, messages);
+    result = await anthropicNonStream(provider, messages, options.providerModelMode);
   } else if (provider.type === "ollama") {
     result = await ollamaNonStream(provider, messages);
   } else {
-    result = await openaiNonStream(provider, messages);
+    result = await openaiNonStream(provider, messages, options.providerModelMode);
   }
 
   // Log usage for ALL non-streaming LLM calls (fact extraction, title gen, etc)
@@ -436,8 +438,9 @@ function openaiBody(
   provider: ResolvedProvider,
   messages: ChatMessage[],
   stream: boolean,
-  webSearch = false
+  providerModelMode?: ProviderModelMode
 ): string {
+  const reasoningEffort = openaiReasoningEffort(provider, providerModelMode);
   return JSON.stringify({
     model: provider.model,
     messages: messages.map((m) => {
@@ -458,19 +461,66 @@ function openaiBody(
     }),
     stream,
     ...(stream ? { stream_options: { include_usage: true } } : {}),
+    ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
   });
+}
+
+export function openaiReasoningEffortForMode(
+  providerType: ProviderType,
+  model: string,
+  providerModelMode?: ProviderModelMode
+): "none" | "medium" | "xhigh" | null {
+  if (providerType !== "openai") return null;
+  if (providerModelMode === "openai-thinking") return "medium";
+  if (
+    providerModelMode === "openai-deep" ||
+    providerModelMode === "openai-pro" ||
+    model.endsWith("-pro")
+  ) return "xhigh";
+  if (providerModelMode === "instant" && model.startsWith("gpt-5")) return "none";
+  return null;
+}
+
+function openaiReasoningEffort(
+  provider: ResolvedProvider,
+  providerModelMode?: ProviderModelMode
+): "none" | "medium" | "xhigh" | null {
+  return openaiReasoningEffortForMode(provider.type, provider.model, providerModelMode);
+}
+
+function shouldUseOpenAINonStreaming(
+  provider: ResolvedProvider,
+  providerModelMode?: ProviderModelMode
+) {
+  return provider.type === "openai" &&
+    (providerModelMode === "openai-pro" || provider.model.endsWith("-pro"));
 }
 
 async function* openaiStream(
   provider: ResolvedProvider,
   messages: ChatMessage[],
-  webSearch = false
+  providerModelMode?: ProviderModelMode
 ): AsyncGenerator<ChatStreamChunk> {
+  if (shouldUseOpenAINonStreaming(provider, providerModelMode)) {
+    const text = await openaiNonStream(provider, messages, providerModelMode);
+    if (text) yield { delta: text, done: false };
+    yield {
+      delta: "",
+      done: true,
+      usage: {
+        inputTokens: Math.round(messages.reduce((sum, m) => sum + (m.content?.length || 0), 0) / 4),
+        outputTokens: Math.round(text.length / 4),
+      },
+      model: provider.model,
+    };
+    return;
+  }
+
   const url = `${provider.baseUrl.replace(/\/$/, "")}/v1/chat/completions`;
   const res = await fetch(url, {
     method: "POST",
     headers: openaiHeaders(provider),
-    body: openaiBody(provider, messages, true, webSearch),
+    body: openaiBody(provider, messages, true, providerModelMode),
   });
   if (!res.ok || !res.body) {
     throw new Error(`OpenAI request failed: ${res.status} ${await res.text()}`);
@@ -515,13 +565,14 @@ async function* openaiStream(
 
 async function openaiNonStream(
   provider: ResolvedProvider,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
+  providerModelMode?: ProviderModelMode
 ): Promise<string> {
   const url = `${provider.baseUrl.replace(/\/$/, "")}/v1/chat/completions`;
   const res = await fetch(url, {
     method: "POST",
     headers: openaiHeaders(provider),
-    body: openaiBody(provider, messages, false),
+    body: openaiBody(provider, messages, false, providerModelMode),
   });
   if (!res.ok) throw new Error(`OpenAI failed: ${res.status} ${await res.text()}`);
   const data = (await res.json()) as {
@@ -548,15 +599,17 @@ function anthropicBody(
   provider: ResolvedProvider,
   messages: ChatMessage[],
   stream: boolean,
-  webSearch = false
+  webSearch = false,
+  providerModelMode?: ProviderModelMode
 ): string {
   // Anthropic puts system prompt outside the messages array
   const systemMessages = messages.filter((m) => m.role === "system");
   const chatMessages = messages.filter((m) => m.role !== "system");
   const systemContent = systemMessages.map((m) => m.content).join("\n\n");
+  const adaptiveEffort = anthropicAdaptiveEffort(providerModelMode);
   return JSON.stringify({
     model: provider.model,
-    max_tokens: 4096,
+    max_tokens: adaptiveEffort ? 16000 : 4096,
     system: systemContent || undefined,
     messages: chatMessages.map((m) => {
       // If the message has images, send as content blocks (Anthropic vision format)
@@ -580,22 +633,50 @@ function anthropicBody(
       return { role: m.role, content: m.content };
     }),
     stream,
+    ...(adaptiveEffort && {
+      thinking: { type: "adaptive", display: "omitted" },
+      output_config: { effort: adaptiveEffort },
+    }),
     ...(webSearch && {
       tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
     }),
   });
 }
 
+export function anthropicAdaptiveEffortForMode(
+  providerModelMode?: ProviderModelMode
+): "low" | "medium" | "high" | "xhigh" | null {
+  switch (providerModelMode) {
+    case "anthropic-adaptive-low":
+      return "low";
+    case "anthropic-adaptive-medium":
+      return "medium";
+    case "anthropic-adaptive-high":
+      return "high";
+    case "anthropic-adaptive-xhigh":
+      return "xhigh";
+    default:
+      return null;
+  }
+}
+
+function anthropicAdaptiveEffort(
+  providerModelMode?: ProviderModelMode
+): "low" | "medium" | "high" | "xhigh" | null {
+  return anthropicAdaptiveEffortForMode(providerModelMode);
+}
+
 async function* anthropicStream(
   provider: ResolvedProvider,
   messages: ChatMessage[],
-  webSearch = false
+  webSearch = false,
+  providerModelMode?: ProviderModelMode
 ): AsyncGenerator<ChatStreamChunk> {
   const url = `${provider.baseUrl.replace(/\/$/, "")}/v1/messages`;
   const res = await fetch(url, {
     method: "POST",
     headers: anthropicHeaders(provider),
-    body: anthropicBody(provider, messages, true, webSearch),
+    body: anthropicBody(provider, messages, true, webSearch, providerModelMode),
   });
   if (!res.ok || !res.body) {
     throw new Error(`Anthropic request failed: ${res.status} ${await res.text()}`);
@@ -644,13 +725,14 @@ async function* anthropicStream(
 
 async function anthropicNonStream(
   provider: ResolvedProvider,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
+  providerModelMode?: ProviderModelMode
 ): Promise<string> {
   const url = `${provider.baseUrl.replace(/\/$/, "")}/v1/messages`;
   const res = await fetch(url, {
     method: "POST",
     headers: anthropicHeaders(provider),
-    body: anthropicBody(provider, messages, false),
+    body: anthropicBody(provider, messages, false, false, providerModelMode),
   });
   if (!res.ok) throw new Error(`Anthropic failed: ${res.status} ${await res.text()}`);
   const data = (await res.json()) as {

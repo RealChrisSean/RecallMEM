@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { chatStream, type ModelMode, type ChatMessage } from "@/lib/llm";
+import { isProviderModelMode, type ProviderModelMode } from "@/lib/llm-config";
 import { createChat, updateChat, getChat } from "@/lib/chats";
 import { buildMemoryAwareSystemPrompt } from "@/lib/memory";
 import { generateTitleIfMissing, extractFactsLive } from "@/lib/post-chat";
@@ -24,6 +25,7 @@ export async function POST(req: NextRequest) {
       chatId?: string;
       model?: string;
       providerId?: string;
+      providerModelMode?: ProviderModelMode;
       webSearch?: boolean;
       thinking?: boolean;
       privateMode?: boolean;
@@ -49,6 +51,7 @@ export async function POST(req: NextRequest) {
         mode,
         providerId: body.providerId || null,
         model: body.model || null,
+        providerModelMode: body.providerModelMode || null,
         webSearch: !!body.webSearch,
         messageCount: body.messages.length,
       },
@@ -234,7 +237,10 @@ export async function POST(req: NextRequest) {
         const SAVE_INTERVAL_MS = 3000;
 
         try {
-          for await (const chunk of chatStream(llmMessages, { mode, model: body.model, providerId: body.providerId, webSearch: body.webSearch, thinking: body.thinking })) {
+          const providerModelMode = isProviderModelMode(body.providerModelMode)
+            ? body.providerModelMode
+            : undefined;
+          for await (const chunk of chatStream(llmMessages, { mode, model: body.model, providerId: body.providerId, providerModelMode, webSearch: body.webSearch, thinking: body.thinking })) {
             if (chunk.delta) {
               assistantContent += chunk.delta;
               const data = JSON.stringify({ delta: chunk.delta });

@@ -1,6 +1,6 @@
 # RecallMEM TODO
 
-What's done, what's planned. Updated as of v0.1 prep.
+What's done, what's planned. Updated after the v0.2.3 voice and memory reliability work.
 
 ---
 
@@ -18,13 +18,13 @@ Planned voice-agent upgrades:
 - [x] **Evaluate Deepgram Browser Agent SDK pieces.** Adopt `@deepgram/agents` for microphone capture and PCM playback while keeping RecallMEM's custom WebSocket/session bridge for auth fallback, memory tool calls, and chat persistence.
 - [x] **Add LLM and TTS fallback chains.** Configure voice-agent `think` and `speak` providers as ordered fallback arrays so transient model/provider failures do not kill the live voice session.
 - [x] **Add Deepgram voice settings.** Let users choose voice, speaking speed, and speaking style in Settings, with pronunciation guidance for app-specific terms like `RecallMEM`, `pgvector`, `Fly.io`, model names, and user names.
-- [ ] **Add model-mode support for text chat.** Let users choose richer chat model modes without making voice slow:
+- [x] **Add model-mode support for text chat.** Let users choose richer chat model modes without making voice slow:
   - OpenAI chat modes: `GPT-5.5 Instant` (`gpt-5.5` with lowest/none reasoning), `GPT-5.5 Thinking` (`gpt-5.5` with medium/high reasoning), `GPT-5.5 Deep` (`gpt-5.5` with `xhigh` reasoning), and `GPT-5.5 Pro` (`gpt-5.5-pro`, text chat only because it can take minutes).
   - Anthropic chat modes: `Claude Opus 4.8 Instant` (omit `thinking`), `Claude Opus 4.8 Adaptive` (`thinking: { type: "adaptive" }`), and adaptive low/medium/high/xhigh via `output_config.effort`.
-  - Add model metadata for `supportsChat`, `supportsVoice`, `supportsReasoning`, provider mode, and whether a mode needs the OpenAI Responses API.
-  - Add an OpenAI Responses API path for GPT reasoning/pro modes.
-  - Add Anthropic adaptive thinking support in the native Messages API path.
-  - Force Voice Agent to use the fastest compatible voice model even when text chat is set to Pro or deep/adaptive reasoning.
+  - Added provider-mode metadata in the picker for instant/thinking/deep/pro/adaptive choices.
+  - Added OpenAI reasoning-effort routing for GPT modes, with non-stream fallback for Pro models.
+  - Added Anthropic adaptive thinking support in the native Messages API path.
+  - Forced Voice Agent to strip OpenAI Pro into a fast compatible model while preserving normal chat modes.
 - [x] **Add dead-air filler during memory/tool calls.** Use Deepgram agent message injection to say short status lines like "Let me check your memory for that" while memory search or tools are running.
 - [x] **Feed memory keyterms into STT.** Pull names, projects, model IDs, companies, and weird exact phrases from RecallMEM memory into Deepgram keyterms so voice transcription catches important terms more reliably.
 - [x] **Audit audio output quality.** Verify output encoding, sample rate, playback buffer handling, and raw PCM/container settings so voice playback avoids static, clicks, overlap, and phone-call quality.
@@ -59,9 +59,9 @@ Additional memory improvements:
 
 ---
 
-## v0.1 (current, not shipped yet)
+## Launch polish
 
-Things to do before the public launch.
+Things to tighten before the next public push.
 
 - [ ] Test the `npx recallmem` first-run flow on a clean machine (no `~/.recallmem`, no DB)
 - [ ] Add Windows path candidates to `bin/lib/detect.js` (psql.exe locations)
@@ -72,14 +72,7 @@ Things to do before the public launch.
 - [ ] Make the GitHub repo public
 - [ ] Post somewhere (Hacker News? r/LocalLLaMA? X?)
 
-## v0.2 (next)
-
-The features that I want next but didn't make v0.1.
-
-### Voice (the easy version, browser-based)
-- [ ] **Mic button** in the chat input. Click to dictate via browser's `SpeechRecognition` API. Recognized text appears in the input field, you review and hit send like normal. Add a clear note that browser speech recognition isn't local (it goes to Google/Apple servers for transcription).
-- [ ] **Speaker icon** on every assistant message. Click to read it aloud via browser's `SpeechSynthesis` API. Uses macOS system voices (fully local on Mac). Click again to stop.
-- [ ] Settings option to pick which voice to use (filter by quality, language, etc.)
+## Next product work
 
 ### Search across past chats
 - [ ] Search box in the sidebar that does keyword + vector search over all past transcripts
@@ -113,12 +106,9 @@ The features that I want next but didn't make v0.1.
 
 ## v1.0 (much later)
 
-### Real voice mode (the local version)
-- [ ] Replace browser `SpeechRecognition` with a local Whisper backend (whisper.cpp or transformers.js in-browser)
-- [ ] Real-time streaming voice mode (not just dictation) with VAD
-- [ ] Local TTS via Piper instead of browser SpeechSynthesis (cross-platform parity)
-- [ ] Voice mode toggle in chat UI
-- [ ] Shared memory across voice and text (already true since they hit the same backend)
+### Local voice mode
+- [ ] Replace cloud voice with an optional fully local stack: whisper.cpp or transformers.js for STT, VAD, and Piper or another local TTS engine.
+- [x] Shared memory across voice and text. The Deepgram Voice Agent already saves turns back into the same chat and memory pipeline.
 
 ### Knowledge graph
 - [ ] Neo4j or in-memory graph layer that turns flat facts into typed relationships (Person, Place, Topic, etc.)
@@ -145,11 +135,13 @@ Things people might ask for that I don't plan to build:
 
 ## Done (the highlights)
 
-Building blocks that are already working in v0.1:
+Building blocks that are already working:
 
 - [x] Fresh Next.js 16 app, Postgres + pgvector locally
 - [x] Three-layer memory: profile + facts + vector search via EmbeddingGemma 300M
 - [x] Chat UI with streaming, markdown rendering, file uploads (PDF, image, text, code)
+- [x] Deepgram Voice Agent with Flux listening, Aura-2 speech, memory tool calls, and chat persistence
+- [x] Deepgram TTS for assistant-message playback
 - [x] Chat history sidebar with date grouping, pinned chats, delete
 - [x] Memory inspector with edit/delete on every fact
 - [x] Custom rules (`RULES.md` page) injected into every system prompt

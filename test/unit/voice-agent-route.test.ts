@@ -126,6 +126,37 @@ describe("voice-agent route", () => {
     ]);
   });
 
+  it("uses the fast base GPT model for voice when text chat selects GPT Pro", async () => {
+    mocks.getProvider.mockResolvedValue({
+      id: "provider-openai",
+      label: "OpenAI",
+      type: "openai",
+      model: "gpt-5.5",
+      base_url: "https://api.openai.com",
+      api_key: "secret",
+      user_id: "local-user",
+      created_at: new Date(),
+    });
+
+    const res = await POST(
+      request({
+        providerId: "provider-openai",
+        model: "gpt-5.5-pro",
+        modelMode: "openai-pro",
+        messages: [],
+      })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.thinkModel).toBe("gpt-5.5");
+    expect(body.thinkModelLabel).toBe("gpt-5.5 via OpenAI");
+    expect(body.settings.agent.think[0].provider).toEqual({
+      type: "open_ai",
+      model: "gpt-5.5",
+    });
+  });
+
   it("uses the selected Anthropic model as Deepgram's think provider", async () => {
     mocks.getProvider.mockResolvedValue({
       id: "provider-anthropic",

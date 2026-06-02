@@ -5,6 +5,7 @@ import { getPinnedFacts, getActiveFacts } from "@/lib/facts";
 import { getRules } from "@/lib/rules";
 import { getProvider } from "@/lib/providers";
 import type { Message } from "@/lib/types";
+import type { ProviderModelMode } from "@/lib/llm-config";
 import {
   VOICE_INPUT_SAMPLE_RATE,
   VOICE_OUTPUT_SAMPLE_RATE,
@@ -143,6 +144,7 @@ interface VoiceAgentRequest {
   privateMode?: boolean;
   providerId?: string | null;
   model?: string | null;
+  modelMode?: ProviderModelMode | null;
 }
 
 type DeepgramThinkProvider =
@@ -501,6 +503,14 @@ function normalizeHostedModelName(model: string) {
   return lastSegment?.trim() || trimmed;
 }
 
+function voiceSafeModelName(model: string, modelMode?: ProviderModelMode | null) {
+  const normalized = normalizeHostedModelName(model);
+  if ((modelMode === "openai-pro" || normalized.startsWith("gpt-")) && normalized.endsWith("-pro")) {
+    return normalized.slice(0, -"-pro".length);
+  }
+  return normalized;
+}
+
 async function resolveVoiceThinkProvider(
   body: VoiceAgentRequest
 ): Promise<VoiceThinkSelection> {
@@ -527,7 +537,7 @@ async function resolveVoiceThinkProvider(
   if (!model) {
     throw new VoiceAgentConfigError("The selected voice model is missing.");
   }
-  const normalizedModel = normalizeHostedModelName(model);
+  const normalizedModel = voiceSafeModelName(model, body.modelMode);
   const modelKey = normalizedModel.toLowerCase();
   const providerKey = `${provider.label} ${provider.base_url || ""} ${provider.model}`.toLowerCase();
 

@@ -4,6 +4,33 @@
 
 export type ModelMode = "standard" | "unrestricted";
 
+export type ProviderModelMode =
+  | "instant"
+  | "openai-thinking"
+  | "openai-deep"
+  | "openai-pro"
+  | "anthropic-adaptive-low"
+  | "anthropic-adaptive-medium"
+  | "anthropic-adaptive-high"
+  | "anthropic-adaptive-xhigh";
+
+export const DEFAULT_PROVIDER_MODEL_MODE: ProviderModelMode = "instant";
+
+const PROVIDER_MODEL_MODES = new Set<ProviderModelMode>([
+  "instant",
+  "openai-thinking",
+  "openai-deep",
+  "openai-pro",
+  "anthropic-adaptive-low",
+  "anthropic-adaptive-medium",
+  "anthropic-adaptive-high",
+  "anthropic-adaptive-xhigh",
+]);
+
+export function isProviderModelMode(value: string | null | undefined): value is ProviderModelMode {
+  return !!value && PROVIDER_MODEL_MODES.has(value as ProviderModelMode);
+}
+
 export interface ModelConfig {
   baseURL: string;
   defaultModel: string;
