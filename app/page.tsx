@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, memo, FormEvent, DragEvent, ChangeEvent } from "react";
+import { useState, useRef, useEffect, useCallback, memo, DragEvent, ChangeEvent } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -147,7 +147,6 @@ export default function ChatPage() {
   const sttContextRef = useRef<AudioContext | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTranscriptTimeRef = useRef(Date.now());
-  const submitIntentRef = useRef(false);
   const [idlePrompt, setIdlePrompt] = useState(false);
   const [idleCountdown, setIdleCountdown] = useState(30);
   const idleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1275,11 +1274,7 @@ export default function ChatPage() {
     setPendingRawFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
-  async function sendMessage(e: FormEvent) {
-    e.preventDefault();
-    const shouldSubmit = submitIntentRef.current;
-    submitIntentRef.current = false;
-    if (!shouldSubmit) return;
+  async function sendMessage() {
     if ((!input.trim() && attachedFiles.length === 0) || isBusy) return;
 
     // Resolve pending text/PDF files now (extract content via /api/upload).
@@ -1579,8 +1574,7 @@ export default function ChatPage() {
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      submitIntentRef.current = true;
-      e.currentTarget.form?.requestSubmit();
+      void sendMessage();
     }
   }
 
@@ -1905,7 +1899,7 @@ export default function ChatPage() {
 
       {/* Input */}
       <div className="border-t border-zinc-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] dark:border-zinc-800 dark:bg-zinc-900 sm:p-4">
-        <form onSubmit={sendMessage} className="max-w-3xl mx-auto">
+        <form onSubmit={(e) => e.preventDefault()} className="max-w-3xl mx-auto">
           <div className="mb-2 sm:hidden">
             <ModelPicker
               modelId={selectedModel}
@@ -2063,10 +2057,7 @@ export default function ChatPage() {
             ) : (
               <button
                 type="button"
-                onClick={() => {
-                  submitIntentRef.current = true;
-                  inputRef.current?.form?.requestSubmit();
-                }}
+                onClick={() => void sendMessage()}
                 disabled={
                   isBusy ||
                   composerDisabled ||
