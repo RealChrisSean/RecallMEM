@@ -1580,7 +1580,7 @@ export default function ChatPage() {
     e.preventDefault();
     e.stopPropagation();
 
-    if (e.shiftKey || e.metaKey || e.ctrlKey) {
+    if (e.metaKey || e.ctrlKey) {
       void sendMessage();
       return;
     }
@@ -2042,7 +2042,7 @@ export default function ChatPage() {
               }
               rows={1}
               disabled={composerDisabled}
-              title="Enter for a new line. Shift+Enter or Cmd/Ctrl+Enter to send."
+              title="Enter or Shift+Enter for a new line. Cmd/Ctrl+Enter to send."
               className={`min-w-0 flex-1 resize-none bg-transparent py-3 ${chatFont.composer} text-zinc-900 placeholder:text-zinc-400 focus:outline-none disabled:opacity-50 dark:text-zinc-100`}
             />
             {/* Mic button — STT dictation */}
