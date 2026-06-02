@@ -1572,9 +1572,36 @@ export default function ChatPage() {
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
+    if (e.key !== "Enter") return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.shiftKey || e.metaKey || e.ctrlKey) {
       void sendMessage();
+      return;
+    }
+
+    const target = e.currentTarget;
+    const start = target.selectionStart ?? input.length;
+    const end = target.selectionEnd ?? input.length;
+    const nextInput = `${input.slice(0, start)}\n${input.slice(end)}`;
+
+    setInput(nextInput);
+    requestAnimationFrame(() => {
+      target.selectionStart = start + 1;
+      target.selectionEnd = start + 1;
+    });
+  }
+
+  function handleFormKeyDown(e: React.KeyboardEvent<HTMLFormElement>) {
+    if (
+      e.key === "Enter" &&
+      e.target instanceof HTMLElement &&
+      e.target.tagName !== "TEXTAREA" &&
+      e.target.tagName !== "BUTTON"
+    ) {
+      e.preventDefault();
     }
   }
 
@@ -1899,7 +1926,11 @@ export default function ChatPage() {
 
       {/* Input */}
       <div className="border-t border-zinc-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] dark:border-zinc-800 dark:bg-zinc-900 sm:p-4">
-        <form onSubmit={(e) => e.preventDefault()} className="max-w-3xl mx-auto">
+        <form
+          onSubmit={(e) => e.preventDefault()}
+          onKeyDown={handleFormKeyDown}
+          className="max-w-3xl mx-auto"
+        >
           <div className="mb-2 sm:hidden">
             <ModelPicker
               modelId={selectedModel}
