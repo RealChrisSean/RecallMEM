@@ -1106,18 +1106,15 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const shouldAutoScrollRef = useRef(true);
   const [showScrollDown, setShowScrollDown] = useState(false);
 
-  // Auto-scroll to bottom when messages change, but only if the user
-  // is already near the bottom. If they've scrolled up to read earlier
-  // content, don't yank them back down on every streaming chunk.
+  // Auto-scroll while the user is following the latest response. The moment
+  // they scroll up, pause this so streaming tokens do not fight the wheel/touch.
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distFromBottom < 150) {
-      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    }
+    if (!el || !shouldAutoScrollRef.current) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
   }, [messages]);
 
   // Auto-resize textarea
@@ -1127,6 +1124,12 @@ export default function ChatPage() {
       inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 200)}px`;
     }
   }, [input]);
+
+  function pauseAutoScrollIfScrollingUp(deltaY: number) {
+    if (deltaY < 0) {
+      shouldAutoScrollRef.current = false;
+    }
+  }
 
   // Read an image as a data URL for preview
   function readImageAsDataURL(file: File): Promise<string> {
@@ -1798,10 +1801,15 @@ export default function ChatPage() {
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto relative"
+        onWheel={(e) => pauseAutoScrollIfScrollingUp(e.deltaY)}
+        onTouchMove={() => {
+          shouldAutoScrollRef.current = false;
+        }}
         onScroll={() => {
           const el = scrollRef.current;
           if (!el) return;
           const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+          shouldAutoScrollRef.current = distFromBottom < 80;
           setShowScrollDown(distFromBottom > 300);
         }}
       >
@@ -1833,12 +1841,14 @@ export default function ChatPage() {
       {showScrollDown && (
         <div className="flex justify-center -mt-6 mb-2 relative z-10">
           <button
-            onClick={() =>
+            onClick={() => {
+              shouldAutoScrollRef.current = true;
+              setShowScrollDown(false);
               scrollRef.current?.scrollTo({
                 top: scrollRef.current.scrollHeight,
                 behavior: "smooth",
-              })
-            }
+              });
+            }}
             className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-300 dark:hover:bg-zinc-700 flex items-center justify-center shadow-md transition-colors"
             title="Scroll to bottom"
           >
