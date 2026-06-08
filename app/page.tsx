@@ -12,6 +12,10 @@ import {
   type ModelId,
   type ProviderModelMode,
 } from "@/lib/llm-config";
+import {
+  formatVoiceAgentSupportedModels,
+  getDeepgramVoiceAgentCompatibility,
+} from "@/lib/voice-agent-models";
 import { AppFooter } from "@/components/AppFooter";
 import { Logo } from "@/components/Logo";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -660,16 +664,24 @@ export default function ChatPage() {
   const selectedVoiceModel = selectedProviderId
     ? selectedProviderModel || selectedVoiceProvider?.model || null
     : selectedModel;
-  const selectedVoiceModelKey = (selectedVoiceModel || "").toLowerCase();
-  const selectedVoiceBaseUrl = (selectedVoiceProvider?.base_url || "").toLowerCase();
-  const voiceAgentDisabledReason =
-    !selectedProviderId ||
-    selectedVoiceProvider?.type === "ollama" ||
-    selectedVoiceModelKey.includes("gemma")
-      ? "Voice Agent needs a cloud model. Local Gemma/Ollama is too slow for realtime voice, so pick a supported cloud model first."
-      : selectedVoiceModelKey.includes("grok") || selectedVoiceBaseUrl.includes("x.ai")
-        ? "Deepgram Voice Agent does not support xAI/Grok as the realtime think model yet. Pick GPT, Claude, Gemini, Groq, or Cerebras for voice."
-        : null;
+  const voiceAgentCompatibility = getDeepgramVoiceAgentCompatibility({
+    providerId: selectedProviderId,
+    providerType: selectedVoiceProvider?.type,
+    providerLabel: selectedVoiceProvider?.label,
+    providerBaseUrl: selectedVoiceProvider?.base_url,
+    providerModel: selectedVoiceProvider?.model,
+    selectedModel: selectedVoiceModel,
+    selectedModelMode: selectedProviderModelMode,
+  });
+  const voiceAgentDisabledReason = voiceAgentCompatibility.compatible
+    ? null
+    : voiceAgentCompatibility.reason;
+  const voiceAgentSupportedModels = voiceAgentCompatibility.compatible
+    ? []
+    : voiceAgentCompatibility.supportedModels;
+  const voiceAgentDisabledMessage = voiceAgentDisabledReason
+    ? `${voiceAgentDisabledReason} Supported voice models: ${formatVoiceAgentSupportedModels(voiceAgentSupportedModels)}.`
+    : null;
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const chatIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -2090,27 +2102,37 @@ export default function ChatPage() {
                 <line x1="12" y1="19" x2="12" y2="22" />
               </svg>
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (voiceAgentDisabledReason) {
-                  setUploadError(voiceAgentDisabledReason);
-                  return;
-                }
-                setUploadError(null);
-                setShowVoiceAgent(true);
-              }}
-              disabled={isBusy}
-              className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
-                voiceAgentDisabledReason
-                  ? "text-amber-500 hover:bg-amber-50 hover:text-amber-600 dark:text-amber-400 dark:hover:bg-amber-950 dark:hover:text-amber-300"
-                  : "text-zinc-500 hover:bg-emerald-50 hover:text-emerald-600 dark:text-zinc-400 dark:hover:bg-emerald-950 dark:hover:text-emerald-300"
-              }`}
-              title={voiceAgentDisabledReason || "Start Voice Agent"}
-              aria-label={voiceAgentDisabledReason || "Start Voice Agent"}
-            >
-              <VoiceAgentIcon />
-            </button>
+            <div className="group relative flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  if (voiceAgentDisabledMessage) {
+                    setUploadError(voiceAgentDisabledMessage);
+                    return;
+                  }
+                  setUploadError(null);
+                  setShowVoiceAgent(true);
+                }}
+                disabled={isBusy}
+                className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
+                  voiceAgentDisabledReason
+                    ? "text-amber-500 hover:bg-amber-50 hover:text-amber-600 dark:text-amber-400 dark:hover:bg-amber-950 dark:hover:text-amber-300"
+                    : "text-zinc-500 hover:bg-emerald-50 hover:text-emerald-600 dark:text-zinc-400 dark:hover:bg-emerald-950 dark:hover:text-emerald-300"
+                }`}
+                title={voiceAgentDisabledMessage || "Start Voice Agent"}
+                aria-label={voiceAgentDisabledMessage || "Start Voice Agent"}
+              >
+                <VoiceAgentIcon />
+              </button>
+              {voiceAgentDisabledMessage && (
+                <div className="pointer-events-none absolute bottom-full right-0 z-50 mb-2 w-72 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-left text-[11px] font-medium leading-snug text-amber-900 opacity-0 shadow-lg transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                  <p>{voiceAgentDisabledReason}</p>
+                  <p className="mt-1 text-amber-700 dark:text-amber-200">
+                    Use: {formatVoiceAgentSupportedModels(voiceAgentSupportedModels)}.
+                  </p>
+                </div>
+              )}
+            </div>
             {isStreaming ? (
               <button
                 type="button"

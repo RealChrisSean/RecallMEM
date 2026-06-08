@@ -10,6 +10,7 @@ import {
   VOICE_INPUT_SAMPLE_RATE,
   VOICE_OUTPUT_SAMPLE_RATE,
 } from "@/lib/voice-audio";
+import { getDeepgramVoiceAgentCompatibility } from "@/lib/voice-agent-models";
 
 export const runtime = "nodejs";
 
@@ -152,7 +153,7 @@ type DeepgramThinkProvider =
   | { type: "anthropic"; model: string }
   | { type: "google"; model: string }
   | { type: "groq"; model: string }
-  | { type: "cerebras"; model: string };
+  | { type: "nvidia"; model: string };
 
 interface VoiceThinkSelection {
   provider: DeepgramThinkProvider;
@@ -497,20 +498,6 @@ Never pretend to remember something that is not in the provided profile, facts, 
   };
 }
 
-function normalizeHostedModelName(model: string) {
-  const trimmed = model.trim();
-  const lastSegment = trimmed.split("/").pop();
-  return lastSegment?.trim() || trimmed;
-}
-
-function voiceSafeModelName(model: string, modelMode?: ProviderModelMode | null) {
-  const normalized = normalizeHostedModelName(model);
-  if ((modelMode === "openai-pro" || normalized.startsWith("gpt-")) && normalized.endsWith("-pro")) {
-    return normalized.slice(0, -"-pro".length);
-  }
-  return normalized;
-}
-
 async function resolveVoiceThinkProvider(
   body: VoiceAgentRequest
 ): Promise<VoiceThinkSelection> {
@@ -534,92 +521,27 @@ async function resolveVoiceThinkProvider(
   }
 
   const model = (body.model || provider.model || "").trim();
-  if (!model) {
-    throw new VoiceAgentConfigError("The selected voice model is missing.");
-  }
-  const normalizedModel = voiceSafeModelName(model, body.modelMode);
-  const modelKey = normalizedModel.toLowerCase();
-  const providerKey = `${provider.label} ${provider.base_url || ""} ${provider.model}`.toLowerCase();
+  const compatibility = getDeepgramVoiceAgentCompatibility({
+    providerId: provider.id,
+    providerType: provider.type,
+    providerLabel: provider.label,
+    providerBaseUrl: provider.base_url,
+    providerModel: provider.model,
+    selectedModel: model,
+    selectedModelMode: body.modelMode,
+  });
 
-  if (modelKey.startsWith("gemma")) {
+  if (!compatibility.compatible) {
     throw new VoiceAgentConfigError(
-      "Voice Agent does not run with Gemma yet. Gemma is too slow for realtime voice, so pick a faster cloud voice model first."
+      `${compatibility.reason} Supported voice models: ${compatibility.supportedModels.join(", ")}.`
     );
   }
 
-  if (provider.type === "openai") {
-    return makeVoiceThinkSelection(
-      { type: "open_ai", model: normalizedModel },
-      provider.id,
-      normalizedModel,
-      `${normalizedModel} via OpenAI`
-    );
-  }
-
-  if (provider.type === "anthropic") {
-    return makeVoiceThinkSelection(
-      { type: "anthropic", model: normalizedModel },
-      provider.id,
-      normalizedModel,
-      `${normalizedModel} via Anthropic`
-    );
-  }
-
-  if (provider.type === "openai-compatible") {
-    if (modelKey.includes("grok") || providerKey.includes("x.ai")) {
-      throw new VoiceAgentConfigError(
-        "Deepgram Voice Agent does not support xAI/Grok as the realtime think model yet. Pick GPT, Claude, Gemini, Groq, or Cerebras for voice."
-      );
-    }
-
-    if (modelKey.startsWith("claude-") || providerKey.includes("anthropic")) {
-      return makeVoiceThinkSelection(
-        { type: "anthropic", model: normalizedModel },
-        provider.id,
-        normalizedModel,
-        `${normalizedModel} via Anthropic`
-      );
-    }
-
-    if (modelKey.startsWith("gemini-") || providerKey.includes("google")) {
-      return makeVoiceThinkSelection(
-        { type: "google", model: normalizedModel },
-        provider.id,
-        normalizedModel,
-        `${normalizedModel} via Google`
-      );
-    }
-
-    if (modelKey.startsWith("gpt-") || /^o\d/.test(modelKey) || providerKey.includes("openai")) {
-      return makeVoiceThinkSelection(
-        { type: "open_ai", model: normalizedModel },
-        provider.id,
-        normalizedModel,
-        `${normalizedModel} via OpenAI`
-      );
-    }
-
-    if (providerKey.includes("groq")) {
-      return makeVoiceThinkSelection(
-        { type: "groq", model: normalizedModel },
-        provider.id,
-        normalizedModel,
-        `${normalizedModel} via Groq`
-      );
-    }
-
-    if (providerKey.includes("cerebras")) {
-      return makeVoiceThinkSelection(
-        { type: "cerebras", model: normalizedModel },
-        provider.id,
-        normalizedModel,
-        `${normalizedModel} via Cerebras`
-      );
-    }
-  }
-
-  throw new VoiceAgentConfigError(
-    "Deepgram Voice Agent does not know how to run this model safely yet. Pick GPT, Claude, Gemini, Groq, or Cerebras, or use chat mode for this provider."
+  return makeVoiceThinkSelection(
+    { type: compatibility.provider, model: compatibility.model },
+    provider.id,
+    compatibility.model,
+    `${compatibility.model} via ${compatibility.providerLabel}`
   );
 }
 

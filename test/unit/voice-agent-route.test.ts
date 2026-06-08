@@ -126,7 +126,7 @@ describe("voice-agent route", () => {
     ]);
   });
 
-  it("uses the fast base GPT model for voice when text chat selects GPT Pro", async () => {
+  it("rejects GPT Pro because realtime voice needs an instant model selection", async () => {
     mocks.getProvider.mockResolvedValue({
       id: "provider-openai",
       label: "OpenAI",
@@ -148,16 +148,46 @@ describe("voice-agent route", () => {
     );
     const body = await res.json();
 
+    expect(res.status).toBe(400);
+    expect(body.error).toContain("only supports realtime/instant");
+    expect(body.error).toContain("GPT-5.5");
+  });
+
+  it("maps Anthropic's dated Haiku ID to Deepgram's supported Haiku ID", async () => {
+    mocks.getProvider.mockResolvedValue({
+      id: "provider-anthropic",
+      label: "Claude",
+      type: "anthropic",
+      model: "claude-haiku-4-5-20251001",
+      base_url: "https://api.anthropic.com",
+      api_key: "secret",
+      user_id: "local-user",
+      created_at: new Date(),
+    });
+
+    const res = await POST(
+      request({
+        providerId: "provider-anthropic",
+        model: "claude-haiku-4-5-20251001",
+        messages: [],
+      })
+    );
+    const body = await res.json();
+
     expect(res.status).toBe(200);
-    expect(body.thinkModel).toBe("gpt-5.5");
-    expect(body.thinkModelLabel).toBe("gpt-5.5 via OpenAI");
+    expect(body.thinkModel).toBe("claude-haiku-4-5");
+    expect(body.thinkModelLabel).toBe("claude-haiku-4-5 via Anthropic");
     expect(body.settings.agent.think[0].provider).toEqual({
+      type: "anthropic",
+      model: "claude-haiku-4-5",
+    });
+    expect(body.settings.agent.think[1].provider).toEqual({
       type: "open_ai",
-      model: "gpt-5.5",
+      model: "gpt-5.4-mini",
     });
   });
 
-  it("uses the selected Anthropic model as Deepgram's think provider", async () => {
+  it("rejects Claude Opus because Deepgram Voice Agent does not expose it", async () => {
     mocks.getProvider.mockResolvedValue({
       id: "provider-anthropic",
       label: "Claude",
@@ -178,20 +208,10 @@ describe("voice-agent route", () => {
     );
     const body = await res.json();
 
-    expect(res.status).toBe(200);
-    expect(body.thinkModelLabel).toBe("claude-opus-4-8 via Anthropic");
-    expect(body.settings.agent.think[0].provider).toEqual({
-      type: "anthropic",
-      model: "claude-opus-4-8",
-    });
-    expect(body.settings.agent.think[1].provider).toEqual({
-      type: "anthropic",
-      model: "claude-haiku-4-5",
-    });
-    expect(body.settings.agent.think[2].provider).toEqual({
-      type: "open_ai",
-      model: "gpt-5.4-mini",
-    });
+    expect(res.status).toBe(400);
+    expect(body.error).toContain("incompatible");
+    expect(body.error).toContain("Claude Sonnet 4.6");
+    expect(body.error).toContain("Claude Haiku 4.5");
   });
 
   it("uses saved voice agent voice, speed, and speaking style settings", async () => {
@@ -435,7 +455,7 @@ describe("voice-agent route", () => {
       id: "provider-gemini",
       label: "Gemini",
       type: "openai-compatible",
-      model: "google/gemini-2.5-flash-preview-05-20",
+      model: "google/gemini-2.5-flash",
       base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
       api_key: "secret",
       user_id: "local-user",
@@ -445,19 +465,17 @@ describe("voice-agent route", () => {
     const res = await POST(
       request({
         providerId: "provider-gemini",
-        model: "google/gemini-2.5-flash-preview-05-20",
+        model: "google/gemini-2.5-flash",
         messages: [],
       })
     );
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.thinkModelLabel).toBe(
-      "gemini-2.5-flash-preview-05-20 via Google"
-    );
+    expect(body.thinkModelLabel).toBe("gemini-2.5-flash via Google");
     expect(body.settings.agent.think[0].provider).toEqual({
       type: "google",
-      model: "gemini-2.5-flash-preview-05-20",
+      model: "gemini-2.5-flash",
     });
     expect(body.settings.agent.think[1].provider).toEqual({
       type: "open_ai",
