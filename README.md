@@ -178,8 +178,10 @@ Wire in your own auth with two calls at startup and every lib function respects 
 | [Architecture deep dive](./docs/ARCHITECTURE.md) | How deterministic memory works, read/write paths, validation pipeline, why the LLM is not in charge |
 | [Developer guide](./docs/DEVELOPERS.md) | Embedding the memory framework, auth wiring, schema, testing, Langfuse setup |
 | [Hardware guide](./docs/HARDWARE.md) | Which model fits which machine, RAM requirements, cloud vs. local tradeoffs |
+| [Security notes](./docs/SECURITY.md) | Local secrets, data boundaries, and repo safety checks |
 | [Troubleshooting](./docs/TROUBLESHOOTING.md) | Every gotcha I've hit and how to fix it |
 | [Manual install](./docs/MANUAL_INSTALL.md) | Step-by-step if you don't want to use the CLI |
+| [Limitations](./docs/LIMITATIONS.md) | Current product boundaries and known tradeoffs |
 
 ## Limitations (v0.2)
 
