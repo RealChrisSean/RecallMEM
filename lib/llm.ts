@@ -124,6 +124,8 @@ const SUPPORTED_IMAGE_MEDIA_TYPES: ImageMediaType[] = [
   "image/webp",
 ];
 
+type AnthropicAdaptiveEffort = "low" | "medium" | "high" | "xhigh";
+
 function splitImageData(image: string): { base64: string; declaredMediaType: string | null } {
   const trimmed = image.trim();
   const match = trimmed.match(/^data:([^;]+);base64,(.*)$/i);
@@ -633,10 +635,7 @@ function anthropicBody(
       return { role: m.role, content: m.content };
     }),
     stream,
-    ...(adaptiveEffort && {
-      thinking: { type: "adaptive", display: "omitted" },
-      output_config: { effort: adaptiveEffort },
-    }),
+    ...anthropicAdaptiveRequestOptionsForModel(provider.model, providerModelMode),
     ...(webSearch && {
       tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
     }),
@@ -645,7 +644,7 @@ function anthropicBody(
 
 export function anthropicAdaptiveEffortForMode(
   providerModelMode?: ProviderModelMode
-): "low" | "medium" | "high" | "xhigh" | null {
+): AnthropicAdaptiveEffort | null {
   switch (providerModelMode) {
     case "anthropic-adaptive-low":
       return "low";
@@ -662,8 +661,28 @@ export function anthropicAdaptiveEffortForMode(
 
 function anthropicAdaptiveEffort(
   providerModelMode?: ProviderModelMode
-): "low" | "medium" | "high" | "xhigh" | null {
+): AnthropicAdaptiveEffort | null {
   return anthropicAdaptiveEffortForMode(providerModelMode);
+}
+
+function isClaudeFable5(model: string) {
+  return model.trim().startsWith("claude-fable-5");
+}
+
+export function anthropicAdaptiveRequestOptionsForModel(
+  model: string,
+  providerModelMode?: ProviderModelMode
+): Record<string, unknown> {
+  const adaptiveEffort = anthropicAdaptiveEffort(providerModelMode);
+  if (!adaptiveEffort) return {};
+
+  const outputConfig = { output_config: { effort: adaptiveEffort } };
+  if (isClaudeFable5(model)) return outputConfig;
+
+  return {
+    thinking: { type: "adaptive", display: "omitted" },
+    ...outputConfig,
+  };
 }
 
 async function* anthropicStream(

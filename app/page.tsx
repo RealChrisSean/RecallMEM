@@ -3309,6 +3309,10 @@ const PROVIDER_MODELS: Record<
   { label: string; apiId: string; pricing?: string; mode?: ProviderModelMode }[]
 > = {
   anthropic: [
+    { label: "Claude Fable 5 Adaptive Low", apiId: "claude-fable-5", mode: "anthropic-adaptive-low", pricing: "$10/$50 per 1M tok" },
+    { label: "Claude Fable 5 Adaptive Medium", apiId: "claude-fable-5", mode: "anthropic-adaptive-medium", pricing: "$10/$50 per 1M tok" },
+    { label: "Claude Fable 5 Adaptive High", apiId: "claude-fable-5", mode: "anthropic-adaptive-high", pricing: "$10/$50 per 1M tok" },
+    { label: "Claude Fable 5 Adaptive XHigh", apiId: "claude-fable-5", mode: "anthropic-adaptive-xhigh", pricing: "$10/$50 per 1M tok" },
     { label: "Claude Opus 4.8 Instant", apiId: "claude-opus-4-8", mode: "instant", pricing: "$5/$25 per 1M tok" },
     { label: "Claude Opus 4.8 Adaptive Low", apiId: "claude-opus-4-8", mode: "anthropic-adaptive-low", pricing: "$5/$25 per 1M tok" },
     { label: "Claude Opus 4.8 Adaptive Medium", apiId: "claude-opus-4-8", mode: "anthropic-adaptive-medium", pricing: "$5/$25 per 1M tok" },

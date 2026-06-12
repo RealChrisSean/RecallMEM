@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   anthropicAdaptiveEffortForMode,
+  anthropicAdaptiveRequestOptionsForModel,
   detectImageMediaType,
   openaiReasoningEffortForMode,
 } from "@/lib/llm";
@@ -37,5 +38,20 @@ describe("provider model modes", () => {
     expect(anthropicAdaptiveEffortForMode("anthropic-adaptive-high")).toBe("high");
     expect(anthropicAdaptiveEffortForMode("anthropic-adaptive-xhigh")).toBe("xhigh");
     expect(anthropicAdaptiveEffortForMode("instant")).toBeNull();
+  });
+
+  it("uses output_config effort without explicit thinking config for Claude Fable 5", () => {
+    expect(
+      anthropicAdaptiveRequestOptionsForModel("claude-fable-5", "anthropic-adaptive-high")
+    ).toEqual({ output_config: { effort: "high" } });
+  });
+
+  it("keeps explicit adaptive thinking config for non-Fable Claude models", () => {
+    expect(
+      anthropicAdaptiveRequestOptionsForModel("claude-opus-4-8", "anthropic-adaptive-high")
+    ).toEqual({
+      thinking: { type: "adaptive", display: "omitted" },
+      output_config: { effort: "high" },
+    });
   });
 });
