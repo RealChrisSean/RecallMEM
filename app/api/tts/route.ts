@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { listProviders } from "@/lib/providers";
 import { getSetting } from "@/lib/settings";
 import { logUsage } from "@/lib/usage";
+import { assertSafeUrl } from "@/lib/url-guard";
 
 export const runtime = "nodejs";
 
@@ -196,8 +197,17 @@ export async function POST(req: NextRequest) {
     const voice = (ttsVoice && OPENAI_VOICES.includes(ttsVoice)) ? ttsVoice : "ash";
     const inputText = text.slice(0, 4096);
     const baseUrl = openai!.base_url || "https://api.openai.com";
+    try {
+      await assertSafeUrl(baseUrl);
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Blocked URL" },
+        { status: 400 }
+      );
+    }
     const res = await fetch(`${baseUrl}/v1/audio/speech`, {
       method: "POST",
+      redirect: "error",
       headers: {
         Authorization: `Bearer ${openai!.api_key}`,
         "Content-Type": "application/json",

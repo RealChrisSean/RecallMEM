@@ -96,4 +96,24 @@ describe("voice-agent save route", () => {
       }
     );
   });
+
+  it("does not extract personal memory from Wiki voice turns", async () => {
+    const res = await POST(
+      request({
+        chatId: "chat-1",
+        providerId: "provider-anthropic",
+        model: "claude-haiku-4-5",
+        workspaceMode: "wiki",
+        messages: [
+          { role: "user", content: "How do Sprites expose public URLs?" },
+          { role: "assistant", content: "Sprites can expose public URLs from the docs." },
+        ],
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(mocks.updateChat).toHaveBeenCalled();
+    expect(mocks.generateTitleIfMissing).not.toHaveBeenCalled();
+    expect(mocks.extractFactsLive).not.toHaveBeenCalled();
+  });
 });

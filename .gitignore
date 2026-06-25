@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# encryption key for secrets at rest — NEVER commit
+.recallmem-secret.key
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

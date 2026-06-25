@@ -146,7 +146,11 @@ interface VoiceAgentRequest {
   providerId?: string | null;
   model?: string | null;
   modelMode?: ProviderModelMode | null;
+  workspaceMode?: VoiceWorkspaceMode | null;
+  wikiBrain?: string | null;
 }
+
+type VoiceWorkspaceMode = "chat" | "wiki" | "study";
 
 type DeepgramThinkProvider =
   | { type: "open_ai"; model: string }
@@ -166,6 +170,14 @@ interface VoiceThinkSelection {
 interface VoicePromptContext {
   prompt: string;
   keyterms: string[];
+}
+
+function normalizeWorkspaceMode(mode: VoiceAgentRequest["workspaceMode"]): VoiceWorkspaceMode {
+  return mode === "wiki" || mode === "study" ? mode : "chat";
+}
+
+function isWikiWorkspaceMode(mode: VoiceWorkspaceMode) {
+  return mode === "wiki" || mode === "study";
 }
 
 async function grantDeepgramToken(apiKey: string) {
@@ -409,12 +421,13 @@ function buildSpeakChain(voiceModel: string, voiceSpeed: number) {
 }
 
 async function buildVoicePromptContext(
+  workspaceMode: VoiceWorkspaceMode,
+  wikiBrain: string,
   privateMode: boolean,
   styleInstruction: string,
   pronunciationGuidance: string,
   keytermSources: Array<string | null | undefined>
 ): Promise<VoicePromptContext> {
-  const customRules = await getRules();
   const now = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     month: "long",
@@ -425,6 +438,52 @@ async function buildVoicePromptContext(
     hour12: true,
   }).format(new Date());
 
+  if (isWikiWorkspaceMode(workspaceMode)) {
+    const studyInstruction = workspaceMode === "study"
+      ? "Study Mode is ON. After calling query_wiki, teach from the sourced answer with one short Socratic question or check-for-understanding. Do not add uncited facts."
+      : "Wiki Mode is ON. Answer directly from the sourced wiki response.";
+    const wikiSubject = wikiBrain === "sprites"
+      ? "Fly.io Sprites. In this session, Sprite and Sprites mean the Fly.io Sprites product and documentation, not the soft drink, CSS sprites, or a generic programming concept."
+      : `the selected "${wikiBrain}" wiki brain.`;
+
+    return {
+      prompt: `You are RecallMEM Wiki Voice Mode in a live voice conversation. Keep replies short, spoken, and natural.
+
+Current time: ${now}
+
+${styleInstruction}
+
+Pronunciation guidance: ${pronunciationGuidance}
+
+${studyInstruction}
+
+The active wiki is ${wikiSubject}
+
+You have exactly one factual tool: query_wiki. It searches the selected brain's public wiki sources only, including imported public GitHub documentation and public URLs.
+
+Hard rule: for every user question in Wiki or Study Mode, call query_wiki before answering or asking a clarifying question. Do not answer from general knowledge first. Do not ask whether the user means a drink, CSS sprites, or another concept. Do not say "let me search/check the wiki"; call query_wiki silently first, then answer from the returned result.
+
+If the user asks a short or ambiguous Sprites question, expand it into a useful wiki query. Examples:
+- "So why Sprite?" -> query_wiki with "why Fly.io Sprites why use Sprites"
+- "why sprites?" -> query_wiki with "why Fly.io Sprites why use Sprites"
+- "how does it work?" -> query_wiki with "how Fly.io Sprites work"
+
+After query_wiki returns, use only the answer and citations returned by query_wiki. Do not use RecallMEM memory, profile facts, previous chats, custom rules, or general knowledge for factual claims.
+
+If query_wiki says "I don't have that in this brain's sources.", say that plainly and ask what public source should be added.
+
+When citations are returned, mention the source name briefly if useful, but do not read long URLs aloud.`,
+      keyterms: buildSttKeyterms([
+        ...keytermSources,
+        "RecallMEM Wiki",
+        "Sprites docs",
+        "query_wiki",
+        workspaceMode === "study" ? "Study Mode" : "Wiki Mode",
+      ]),
+    };
+  }
+
+  const customRules = await getRules();
   if (privateMode) {
     return {
       prompt: `You are RecallMEM in a live voice conversation. Keep replies short, warm, and natural.
@@ -555,6 +614,12 @@ async function buildConfig(body: VoiceAgentRequest) {
   }
 
   const privateMode = !!body.privateMode;
+  const workspaceMode = normalizeWorkspaceMode(body.workspaceMode);
+  const wikiBrain = (body.wikiBrain || "sprites")
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "sprites";
   const thinkSelection = await resolveVoiceThinkProvider(body);
   const [credential, voiceSetting, speedSetting, styleSetting, pronunciationSetting] = await Promise.all([
     getDeepgramBrowserCredential(deepgramKey),
@@ -567,6 +632,8 @@ async function buildConfig(body: VoiceAgentRequest) {
   const voiceSpeed = normalizeVoiceAgentSpeed(speedSetting);
   const voiceStyle = normalizeVoiceAgentStyle(styleSetting);
   const promptContext = await buildVoicePromptContext(
+    workspaceMode,
+    wikiBrain,
     privateMode,
     resolveVoiceAgentStyle(voiceStyle),
     buildPronunciationGuidance(pronunciationSetting),
@@ -578,10 +645,28 @@ async function buildConfig(body: VoiceAgentRequest) {
     ]
   );
 
-  const history = recentHistory(body.messages);
-  const functions = privateMode
-    ? []
-    : [
+  const history = isWikiWorkspaceMode(workspaceMode) ? [] : recentHistory(body.messages);
+  const functions = isWikiWorkspaceMode(workspaceMode)
+    ? [
+        {
+          name: "query_wiki",
+          description:
+            "Required before every answer in Wiki or Study Mode. Search the active public wiki, then answer only from the returned source-grounded answer and citations.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: {
+                type: "string",
+                description: "The user's latest spoken question, rewritten as a concise public wiki search query. If the user says Sprite or Sprites, treat it as Fly.io Sprites.",
+              },
+            },
+            required: ["query"],
+          },
+        },
+      ]
+    : privateMode
+      ? []
+      : [
         {
           name: "search_memory",
           description:
@@ -600,6 +685,15 @@ async function buildConfig(body: VoiceAgentRequest) {
       ];
   const thinkChain = buildThinkChain(thinkSelection, promptContext.prompt, functions);
   const speakChain = buildSpeakChain(voiceModel, voiceSpeed);
+  const greeting = isWikiWorkspaceMode(workspaceMode)
+    ? workspaceMode === "study"
+      ? wikiBrain === "sprites"
+        ? "Study voice is ready. Ask me about Fly.io Sprites."
+        : "Study voice is ready. Ask me about this wiki."
+      : wikiBrain === "sprites"
+        ? "Wiki voice is ready. Ask me about Fly.io Sprites."
+        : "Wiki voice is ready. Ask me about this wiki."
+    : "Hey, I'm here. What's up?";
   const listenProvider = {
     type: "deepgram",
     version: VOICE_AGENT_LISTEN_PROVIDER_VERSION,
@@ -631,7 +725,7 @@ async function buildConfig(body: VoiceAgentRequest) {
       },
       think: thinkChain,
       speak: speakChain,
-      greeting: "Hey, I'm here. What's up?",
+      greeting,
     },
   };
 

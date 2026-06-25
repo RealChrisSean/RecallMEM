@@ -5,6 +5,34 @@ import fs from "fs";
 
 export const runtime = "nodejs";
 
+// The self-update endpoint runs `git pull` + `npm install` + migrations on
+// the server — i.e. it executes whatever lands on origin/main plus any npm
+// lifecycle scripts. That's fine for a user updating their own local
+// install, but it must NOT be reachable by a remote attacker if this app is
+// ever exposed beyond localhost. We gate it to loopback requests.
+//
+// This version of Next has no request.ip, so we infer "local" from the Host
+// header and the absence of proxy-forwarding headers (which would mean the
+// request traversed a reverse proxy from outside the loopback interface).
+// Set RECALLMEM_ALLOW_REMOTE_UPDATE=1 to bypass (e.g. behind your own auth).
+function isLocalRequest(req: NextRequest): boolean {
+  if (process.env.RECALLMEM_ALLOW_REMOTE_UPDATE === "1") return true;
+
+  // Any forwarding header implies the request came through a proxy.
+  for (const h of ["x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded"]) {
+    if (req.headers.get(h)) return false;
+  }
+
+  const host = (req.headers.get("host") || "").toLowerCase();
+  const hostname = host.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname.endsWith(".localhost")
+  );
+}
+
 // The install path. npx users get ~/.recallmem, dev users get cwd.
 function getInstallPath(): string {
   const home = process.env.RECALLMEM_HOME || path.join(
@@ -94,7 +122,13 @@ export async function GET() {
  * POST /api/update — pull the latest code, install deps, run migrations.
  * Does NOT restart the server — the user needs to restart manually.
  */
-export async function POST(_req: NextRequest) {
+export async function POST(req: NextRequest) {
+  if (!isLocalRequest(req)) {
+    return json(
+      { ok: false, message: "Self-update is only allowed from localhost." },
+      403
+    );
+  }
   const installPath = getInstallPath();
 
   const steps: { step: string; ok: boolean; output?: string }[] = [];

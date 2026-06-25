@@ -25,6 +25,7 @@ const VoiceAgent = dynamic(() => import("@/components/VoiceAgent"), { ssr: false
 const MODEL_STORAGE_KEY = "recallmem_selected_model";
 const SIDEBAR_STORAGE_KEY = "recallmem_sidebar_open";
 const CHAT_FONT_STORAGE_KEY = "recallmem_chat_font_scale";
+const WORKSPACE_MODE_STORAGE_KEY = "recallmem_workspace_mode";
 const CHAT_RETRY_STATUSES = new Set([408, 502, 503, 504]);
 const CHAT_RETRY_DELAYS_MS = [700, 1500, 3000, 5000];
 
@@ -78,6 +79,21 @@ const CHAT_FONT_SCALES = {
 type ChatFontScale = keyof typeof CHAT_FONT_SCALES;
 const CHAT_FONT_SCALE_ORDER: ChatFontScale[] = ["sm", "md", "lg", "xl"];
 
+type WorkspaceMode = "chat" | "wiki" | "study";
+const WORKSPACE_MODES: { id: WorkspaceMode; label: string }[] = [
+  { id: "chat", label: "Chat" },
+  { id: "wiki", label: "Wiki" },
+  { id: "study", label: "Study Mode" },
+];
+
+function workspaceModeLabel(mode: WorkspaceMode) {
+  return WORKSPACE_MODES.find((item) => item.id === mode)?.label || "Chat";
+}
+
+function markdownLinkText(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+}
+
 interface ChatListItem {
   id: string;
   title: string | null;
@@ -127,6 +143,7 @@ export default function ChatPage() {
   const [dontShowWebSearchWarning, setDontShowWebSearchWarning] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [privateMode, setPrivateMode] = useState(false);
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("chat");
   const [showBrainPicker, setShowBrainPicker] = useState(true);
   const [chatFontScale, setChatFontScale] = useState<ChatFontScale>("md");
 
@@ -144,11 +161,23 @@ export default function ChatPage() {
     ) {
       setChatFontScale(savedFontScale as ChatFontScale);
     }
+    const savedWorkspaceMode = localStorage.getItem(WORKSPACE_MODE_STORAGE_KEY);
+    if (
+      savedWorkspaceMode === "chat" ||
+      savedWorkspaceMode === "wiki" ||
+      savedWorkspaceMode === "study"
+    ) {
+      setWorkspaceMode(savedWorkspaceMode);
+    }
   }, []);
 
   useEffect(() => {
     localStorage.setItem(CHAT_FONT_STORAGE_KEY, chatFontScale);
   }, [chatFontScale]);
+
+  useEffect(() => {
+    localStorage.setItem(WORKSPACE_MODE_STORAGE_KEY, workspaceMode);
+  }, [workspaceMode]);
 
   const [showBrainHint, setShowBrainHint] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -658,6 +687,10 @@ export default function ChatPage() {
   const noChatBackend = modelsLoaded && !hasGemmaInstalled && !hasCloudProvider;
   const isBusy = isStreaming;
   const composerDisabled = noChatBackend;
+  const selectedWikiBrain =
+    activeBrain === "default" && brains.some((brain) => brain.name === "sprites")
+      ? "sprites"
+      : activeBrain;
   const selectedVoiceProvider = selectedProviderId
     ? customProviders.find((p) => p.id === selectedProviderId) || null
     : null;
@@ -1310,6 +1343,10 @@ export default function ChatPage() {
 
   async function sendMessage() {
     if ((!input.trim() && attachedFiles.length === 0) || isBusy) return;
+    if (workspaceMode !== "chat" && attachedFiles.length > 0) {
+      setUploadError("Attachments are only supported in Chat mode for now.");
+      return;
+    }
 
     // Resolve pending text/PDF files now (extract content via /api/upload).
     // Images are already ready.
@@ -1374,6 +1411,94 @@ export default function ChatPage() {
 
     // Add empty assistant message that we'll fill in as the stream comes in
     setMessages([...newMessages, { role: "assistant", content: "" }]);
+
+    if (workspaceMode !== "chat") {
+      const wikiBrain =
+        activeBrain === "default" && brains.some((brain) => brain.name === "sprites")
+          ? "sprites"
+          : activeBrain;
+      try {
+        const abort = new AbortController();
+        abortRef.current = abort;
+        const res = await fetch("/api/wiki/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            brain: wikiBrain,
+            question: messageContent,
+            socratic: workspaceMode === "study",
+            publicSourcesOnly: true,
+            ...(selectedProviderId
+              ? {
+                  providerId: selectedProviderId,
+                  model: selectedProviderModel || undefined,
+                  providerModelMode: selectedProviderModelMode,
+                }
+              : { model: selectedModel }),
+          }),
+          signal: abort.signal,
+        });
+        const data = (await res.json()) as {
+          ok?: boolean;
+          answer?: string;
+          citations?: {
+            marker: string;
+            citation: string;
+            quote?: string | null;
+            url?: string | null;
+          }[];
+          validationFailed?: boolean;
+          notInSources?: boolean;
+          error?: string;
+        };
+        if (!res.ok || data.ok === false) {
+          throw new Error(data.error || `Request failed: ${res.status}`);
+        }
+        const citations = data.citations || [];
+        const citationBlock = citations.length > 0
+          ? [
+              "",
+              "### Citations",
+              ...citations.map((citation) => {
+                const label = `[${citation.marker}] ${citation.citation}`;
+                return citation.url
+                  ? `- [${markdownLinkText(label)}](<${citation.url}>)`
+                  : `- ${label}`;
+              }),
+            ].join("\n")
+          : "";
+        const prefix = data.validationFailed
+          ? "Citation validation fallback.\n\n"
+          : "";
+        const answerText = `${prefix}${data.answer || "I don't have that in this brain's sources."}${citationBlock}`;
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: answerText,
+          };
+          return updated;
+        });
+      } catch (err) {
+        if ((err as Error).name === "AbortError") {
+          setMessages((prev) => prev.slice(0, -1));
+        } else {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              role: "assistant",
+              content: `Error: ${message}`,
+            };
+            return updated;
+          });
+        }
+      } finally {
+        abortRef.current = null;
+        setIsStreaming(false);
+      }
+      return;
+    }
 
     try {
       const abort = new AbortController();
@@ -1609,6 +1734,15 @@ export default function ChatPage() {
     });
   }
 
+  function selectWorkspaceMode(nextMode: WorkspaceMode) {
+    setWorkspaceMode(nextMode);
+    setUploadError(null);
+    if (nextMode !== "chat") {
+      setWebSearch(false);
+      setThinkingEnabled(false);
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key !== "Enter") return;
 
@@ -1669,6 +1803,7 @@ export default function ChatPage() {
   }
 
   const chatFont = CHAT_FONT_SCALES[chatFontScale];
+  const chatModeActive = workspaceMode === "chat";
 
   return (
     <div
@@ -1852,7 +1987,19 @@ export default function ChatPage() {
       >
         <div className="mx-auto max-w-3xl space-y-6 px-3 py-4 sm:px-4 sm:py-6">
           {messages.length === 0 ? (
-            <div className="py-16 text-center sm:py-20">
+            <div className="py-14 text-center sm:py-20">
+              <div className="mb-5 flex items-center justify-center gap-3">
+                <Logo size={32} className="text-zinc-900 dark:text-zinc-100" />
+                <h2 className="text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 sm:text-3xl">
+                  Start with {workspaceModeLabel(workspaceMode)}
+                </h2>
+              </div>
+              <div className="mb-8 flex justify-center">
+                <WorkspaceModeTabs
+                  value={workspaceMode}
+                  onChange={selectWorkspaceMode}
+                />
+              </div>
               <p className={`${chatFont.emptyPrimary} text-zinc-500 dark:text-zinc-400`}>
                 Start a conversation. Everything stays on your machine.
                 <br />
@@ -1978,6 +2125,15 @@ export default function ChatPage() {
           onKeyDown={handleFormKeyDown}
           className="max-w-3xl mx-auto"
         >
+          {messages.length > 0 && (
+            <div className="mb-2 flex justify-center">
+              <WorkspaceModeTabs
+                value={workspaceMode}
+                onChange={selectWorkspaceMode}
+                compact
+              />
+            </div>
+          )}
           <div className="mb-2 sm:hidden">
             <ModelPicker
               modelId={selectedModel}
@@ -2021,13 +2177,14 @@ export default function ChatPage() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isBusy}
+              disabled={isBusy || !chatModeActive}
               className="flex-shrink-0 w-8 h-8 rounded-full text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              title="Attach file"
+              title={chatModeActive ? "Attach file" : "Attachments are only supported in Chat mode"}
             >
               <PaperclipIcon />
             </button>
             {(() => {
+              if (!chatModeActive) return null;
               const sel = customProviders.find((p) => p.id === selectedProviderId);
               const isLocal = !selectedProviderId;
               const isAnthropic = sel?.type === "anthropic";
@@ -2077,7 +2234,15 @@ export default function ChatPage() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={
-                noChatBackend ? "Set up a model first ↑" : isRecording ? "Listening..." : "Ask me anything"
+                noChatBackend
+                  ? "Set up a model first ↑"
+                  : isRecording
+                    ? "Listening..."
+                    : workspaceMode === "wiki"
+                      ? "Ask your wiki"
+                      : workspaceMode === "study"
+                        ? "Study from your wiki"
+                        : "Ask me anything"
               }
               rows={1}
               disabled={composerDisabled}
@@ -2088,13 +2253,17 @@ export default function ChatPage() {
             <button
               type="button"
               onClick={isRecording ? stopRecording : startRecording}
-              disabled={composerDisabled || isBusy}
+              disabled={composerDisabled || isBusy || !chatModeActive}
               className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
                 isRecording
                   ? "bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400 animate-pulse"
                   : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
               }`}
-              title={isRecording ? "Stop listening" : "Voice input (Whisper)"}
+              title={
+                chatModeActive
+                  ? isRecording ? "Stop listening" : "Voice input (Whisper)"
+                  : "Voice input is only supported in Chat mode"
+              }
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
@@ -2311,6 +2480,8 @@ export default function ChatPage() {
           providerId={selectedProviderId}
           selectedModel={selectedVoiceModel}
           selectedModelMode={selectedProviderModelMode}
+          workspaceMode={workspaceMode}
+          wikiBrain={selectedWikiBrain}
           onSaved={(savedChatId, savedMessages) => {
             setChatId(savedChatId);
             chatIdRef.current = savedChatId;
@@ -3081,15 +3252,21 @@ const MessageBubble = memo(function MessageBubble({
         ) : displayContent ? (
           <MarkdownContent content={displayContent} fontScale={fontScale} />
         ) : null}
-        {/* Copy button — inside bubble, top-right, appears on hover */}
+        {/* Message actions: always visible on touch/mobile, hover-revealed on desktop. */}
         {message.content && (
-          <div className={`absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity`}>
+          <div className="mt-2 flex items-center justify-end gap-1 opacity-100 transition-opacity sm:absolute sm:right-2 sm:top-2 sm:mt-0 sm:opacity-0 sm:group-hover:opacity-100">
             {/* Speaker button — TTS */}
-            {!isUser && onSpeak && (
+            {onSpeak && (
               <button
-                onClick={() => onSpeak(displayContent)}
-                className="p-1 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                type="button"
+                onClick={() => onSpeak(displayContent || message.content)}
+                className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors sm:h-auto sm:w-auto sm:p-1 ${
+                  isUser
+                    ? "text-white/70 hover:bg-white/10 hover:text-white"
+                    : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                }`}
                 title="Read aloud"
+                aria-label="Read message aloud"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
@@ -3099,13 +3276,15 @@ const MessageBubble = memo(function MessageBubble({
               </button>
             )}
           <button
+            type="button"
             onClick={copyToClipboard}
-            className={`p-1 rounded ${
+            className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors sm:h-auto sm:w-auto sm:p-1 ${
               isUser
                 ? "text-white/50 hover:text-white hover:bg-white/10"
                 : "text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             }`}
             title="Copy to clipboard"
+            aria-label={copied ? "Copied" : "Copy message"}
           >
             {copied ? (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -3337,6 +3516,46 @@ const PROVIDER_MODELS: Record<
     { label: "GPT-4.1", apiId: "gpt-4.1", pricing: "$2/$8 per 1M tok" },
   ],
 };
+
+function WorkspaceModeTabs({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: WorkspaceMode;
+  onChange: (mode: WorkspaceMode) => void;
+  compact?: boolean;
+}) {
+  return (
+    <div
+      className={`inline-flex rounded-full border border-zinc-200 bg-white p-1 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${
+        compact ? "max-w-full" : ""
+      }`}
+      role="tablist"
+      aria-label="RecallMEM mode"
+    >
+      {WORKSPACE_MODES.map((mode) => {
+        const selected = value === mode.id;
+        return (
+          <button
+            key={mode.id}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            onClick={() => onChange(mode.id)}
+            className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors sm:px-4 ${
+              selected
+                ? "bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-950"
+                : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            } ${compact ? "whitespace-nowrap text-xs sm:text-sm" : ""}`}
+          >
+            {mode.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function ModelPicker({
   modelId,

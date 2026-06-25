@@ -13,6 +13,8 @@ import {
 const MEMORY_FILLER_DELAY_MS = 450;
 const MEMORY_FILLER_MESSAGE = "Let me check your memory for that.";
 
+type VoiceWorkspaceMode = "chat" | "wiki" | "study";
+
 type VoiceStatus =
   | "connecting"
   | "listening"
@@ -27,6 +29,8 @@ interface VoiceAgentProps {
   providerId: string | null;
   selectedModel: string | null;
   selectedModelMode?: ProviderModelMode;
+  workspaceMode: VoiceWorkspaceMode;
+  wikiBrain: string;
   onSaved: (chatId: string, messages: Message[]) => void;
   onClose: () => void;
 }
@@ -66,6 +70,8 @@ export default function VoiceAgent({
   providerId,
   selectedModel,
   selectedModelMode,
+  workspaceMode,
+  wikiBrain,
   onSaved,
   onClose,
 }: VoiceAgentProps) {
@@ -212,6 +218,7 @@ export default function VoiceAgent({
         messages: nextMessages,
         providerId,
         model: selectedModel,
+        workspaceMode,
       }),
     });
 
@@ -268,7 +275,7 @@ export default function VoiceAgent({
             args = {};
           }
 
-          let content = "Memory search failed. Answer based on the current conversation.";
+          let content = "Tool call failed. Answer only from the current conversation.";
           let fillerTimer: ReturnType<typeof setTimeout> | null = null;
           if (fn.name === "search_memory" && args.query?.trim()) {
             fillerTimer = setTimeout(() => {
@@ -293,6 +300,46 @@ export default function VoiceAgent({
               });
             } catch (err) {
               console.error("[voice-agent] memory search failed:", err);
+            } finally {
+              if (fillerTimer) clearTimeout(fillerTimer);
+            }
+          } else if (fn.name === "query_wiki" && args.query?.trim()) {
+            try {
+              const res = await fetch("/api/voice-agent/wiki", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  query: args.query,
+                  brain: wikiBrain,
+                  socratic: workspaceMode === "study",
+                  providerId,
+                  model: selectedModel,
+                  modelMode: selectedModelMode,
+                }),
+              });
+              const result = (await res.json()) as {
+                answer?: string;
+                citations?: { marker: string; citation: string; url?: string | null }[];
+                notInSources?: boolean;
+                validationFailed?: boolean;
+                error?: string;
+              };
+              content = JSON.stringify({
+                answer:
+                  result.answer ||
+                  result.error ||
+                  "I don't have that in this brain's sources.",
+                citations: result.citations || [],
+                notInSources: !!result.notInSources,
+                validationFailed: !!result.validationFailed,
+              });
+            } catch (err) {
+              console.error("[voice-agent] wiki query failed:", err);
+              content = JSON.stringify({
+                answer: "I don't have that in this brain's sources.",
+                citations: [],
+                notInSources: true,
+              });
             } finally {
               if (fillerTimer) clearTimeout(fillerTimer);
             }
@@ -326,6 +373,8 @@ export default function VoiceAgent({
           providerId,
           model: selectedModel,
           modelMode: selectedModelMode,
+          workspaceMode,
+          wikiBrain,
         }),
       });
 
@@ -576,7 +625,11 @@ export default function VoiceAgent({
             />
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                Deepgram Voice Agent
+                {workspaceMode === "wiki"
+                  ? "Wiki Voice Agent"
+                  : workspaceMode === "study"
+                    ? "Study Voice Agent"
+                    : "Deepgram Voice Agent"}
               </div>
               <div className="text-xs text-zinc-500 dark:text-zinc-400">
                 {statusLabel} · {formatTime(elapsed)}
@@ -655,9 +708,16 @@ export default function VoiceAgent({
             <p className="max-w-xs text-sm text-zinc-600 dark:text-zinc-300">
               {micMuted
                 ? "Your mic is muted. The AI can keep talking, and you can unmute when you want to jump back in."
-                : "Talk naturally. I can use RecallMEM memory through tools, and I'll save the voice turn back into this chat."}
+                : workspaceMode === "chat"
+                  ? "Talk naturally. I can use RecallMEM memory through tools, and I'll save the voice turn back into this chat."
+                  : "Talk naturally. I will answer only from public wiki sources and save the transcript locally."}
             </p>
-            {privateMode && (
+            {workspaceMode !== "chat" && (
+              <p className="mt-3 max-w-xs rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+                Wiki voice is source-only: no RecallMEM memory or profile facts.
+              </p>
+            )}
+            {privateMode && workspaceMode === "chat" && (
               <p className="mt-3 max-w-xs rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
                 Private mode is on: stored memory is not sent to the voice model.
               </p>

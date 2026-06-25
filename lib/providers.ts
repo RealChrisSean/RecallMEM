@@ -1,4 +1,5 @@
 import { query, queryOne, getBaseUserId } from "@/lib/db";
+import { encryptSecret, decryptSecret } from "@/lib/crypto";
 
 // Providers are shared across all brains. A user adds their Claude
 // API key once and every brain can use it. Uses getBaseUserId()
@@ -22,6 +23,14 @@ export interface ProviderRow {
   created_at: Date;
 }
 
+// API keys are encrypted at rest (AES-256-GCM, see lib/crypto.ts). These
+// helpers transparently decrypt rows on read so callers always see the
+// plaintext key. Legacy plaintext rows decrypt to themselves.
+function decryptRow(row: ProviderRow): ProviderRow {
+  if (row.api_key) row.api_key = decryptSecret(row.api_key);
+  return row;
+}
+
 // Default base URLs by type
 export const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
   ollama: "http://localhost:11434",
@@ -33,21 +42,23 @@ export const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
 // List all custom providers configured by the user
 export async function listProviders(): Promise<ProviderRow[]> {
   const userId = await getUserId();
-  return query<ProviderRow>(
+  const rows = await query<ProviderRow>(
     `SELECT * FROM s2m_llm_providers
      WHERE user_id = $1 OR user_id LIKE $2
      ORDER BY created_at ASC`,
     [userId, `${userId}::%`]
   );
+  return rows.map(decryptRow);
 }
 
 export async function getProvider(id: string): Promise<ProviderRow | null> {
   const userId = await getUserId();
-  return queryOne<ProviderRow>(
+  const row = await queryOne<ProviderRow>(
     `SELECT * FROM s2m_llm_providers
      WHERE id = $1 AND (user_id = $2 OR user_id LIKE $3)`,
     [id, userId, `${userId}::%`]
   );
+  return row ? decryptRow(row) : null;
 }
 
 export async function createProvider(input: {
@@ -59,11 +70,12 @@ export async function createProvider(input: {
 }): Promise<string> {
   const userId = await getUserId();
   const baseUrl = input.base_url || DEFAULT_BASE_URLS[input.type] || null;
+  const apiKey = input.api_key ? encryptSecret(input.api_key) : null;
   const row = await queryOne<{ id: string }>(
     `INSERT INTO s2m_llm_providers (user_id, label, type, base_url, api_key, model)
      VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id`,
-    [userId, input.label, input.type, baseUrl, input.api_key || null, input.model]
+    [userId, input.label, input.type, baseUrl, apiKey, input.model]
   );
   if (!row) throw new Error("Failed to create provider");
   return row.id;
@@ -96,7 +108,7 @@ export async function updateProvider(
   }
   if (input.api_key !== undefined) {
     sets.push(`api_key = $${i++}`);
-    params.push(input.api_key);
+    params.push(input.api_key ? encryptSecret(input.api_key) : null);
   }
   if (input.model !== undefined) {
     sets.push(`model = $${i++}`);

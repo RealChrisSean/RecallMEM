@@ -12,6 +12,11 @@ export const runtime = "nodejs";
 
 const EXTERNAL_MEMORY_NAMESPACE = "3dd86b58-f1b8-4e92-a9c2-43683b6eb123";
 
+// Each fact triggers embedding + recategorization + profile rebuild, so an
+// unbounded array is expensive. Cap the count and per-fact length.
+const MAX_FACTS = 1000;
+const MAX_FACT_CHARS = 10_000;
+
 /**
  * POST /api/memory/ingest
  *
@@ -35,6 +40,16 @@ export async function POST(req: NextRequest) {
 
     if (!body.facts || !Array.isArray(body.facts) || body.facts.length === 0) {
       return json({ error: "facts array required" }, 400);
+    }
+
+    if (body.facts.length > MAX_FACTS) {
+      return json({ error: `Too many facts (max ${MAX_FACTS})` }, 413);
+    }
+    if (!body.facts.every((f) => typeof f === "string" && f.length <= MAX_FACT_CHARS)) {
+      return json(
+        { error: `Each fact must be a string under ${MAX_FACT_CHARS} chars` },
+        413
+      );
     }
 
     const source = body.source || "external";

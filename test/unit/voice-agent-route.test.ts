@@ -126,6 +126,91 @@ describe("voice-agent route", () => {
     ]);
   });
 
+  it("uses only the wiki query tool in Wiki voice mode", async () => {
+    mocks.getProvider.mockResolvedValue({
+      id: "provider-openai",
+      label: "OpenAI",
+      type: "openai",
+      model: "gpt-5.5",
+      base_url: "https://api.openai.com",
+      api_key: "secret",
+      user_id: "local-user",
+      created_at: new Date(),
+    });
+
+    const res = await POST(
+      request({
+        providerId: "provider-openai",
+        model: "gpt-5.5",
+        workspaceMode: "wiki",
+        wikiBrain: "sprites",
+        messages: [
+          { role: "user", content: "A private prior chat message" },
+          { role: "assistant", content: "A private prior answer" },
+        ],
+      })
+    );
+    const body = await res.json();
+    const functions = body.settings.agent.think[0].functions;
+
+    expect(res.status).toBe(200);
+    expect(mocks.getRules).not.toHaveBeenCalled();
+    expect(mocks.getProfile).not.toHaveBeenCalled();
+    expect(mocks.getPinnedFacts).not.toHaveBeenCalled();
+    expect(mocks.getActiveFacts).not.toHaveBeenCalled();
+    expect(functions).toHaveLength(1);
+    expect(functions[0].name).toBe("query_wiki");
+    expect(body.settings.agent.context).toBeUndefined();
+    expect(body.settings.agent.greeting).toBe(
+      "Wiki voice is ready. Ask me about Fly.io Sprites."
+    );
+    expect(body.settings.agent.think[0].prompt).toContain("RecallMEM Wiki Voice Mode");
+    expect(body.settings.agent.think[0].prompt).toContain("public wiki sources only");
+    expect(body.settings.agent.think[0].prompt).toContain("Fly.io Sprites");
+    expect(body.settings.agent.think[0].prompt).toContain('"So why Sprite?"');
+    expect(body.settings.agent.think[0].prompt).toContain("call query_wiki before answering");
+    expect(body.settings.agent.think[0].prompt).toContain(
+      "Do not say \"let me search/check the wiki\""
+    );
+    expect(body.settings.agent.think[0].prompt).toContain(
+      "Do not use RecallMEM memory"
+    );
+    expect(body.settings.agent.think[0].prompt).not.toContain("search_memory");
+    expect(body.settings.agent.think[0].prompt).not.toContain("<important_memory>");
+  });
+
+  it("uses the wiki query tool in Study voice mode, even in private mode", async () => {
+    mocks.getProvider.mockResolvedValue({
+      id: "provider-openai",
+      label: "OpenAI",
+      type: "openai",
+      model: "gpt-5.5",
+      base_url: "https://api.openai.com",
+      api_key: "secret",
+      user_id: "local-user",
+      created_at: new Date(),
+    });
+
+    const res = await POST(
+      request({
+        providerId: "provider-openai",
+        model: "gpt-5.5",
+        workspaceMode: "study",
+        privateMode: true,
+        messages: [],
+      })
+    );
+    const body = await res.json();
+    const functions = body.settings.agent.think[0].functions;
+
+    expect(res.status).toBe(200);
+    expect(functions).toHaveLength(1);
+    expect(functions[0].name).toBe("query_wiki");
+    expect(body.settings.agent.think[0].prompt).toContain("Study Mode is ON");
+    expect(body.settings.agent.think[0].prompt).not.toContain("Private mode is ON");
+    expect(body.settings.agent.think[0].prompt).not.toContain("search_memory");
+  });
+
   it("rejects GPT Pro because realtime voice needs an instant model selection", async () => {
     mocks.getProvider.mockResolvedValue({
       id: "provider-openai",

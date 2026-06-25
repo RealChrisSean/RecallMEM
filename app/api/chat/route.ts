@@ -15,6 +15,13 @@ import type { Message } from "@/lib/types";
 // How many recent exchanges (user+assistant pairs) to keep in full
 const RECENT_EXCHANGES = 5; // 5 exchanges = 10 messages
 
+// Payload caps. The endpoint embeds, vector-searches, and forwards content
+// to the LLM, so an unbounded body is a DoS / token-cost amplification
+// vector. These limits are generous for real use but reject abuse.
+const MAX_MESSAGES = 2000;
+const MAX_TOTAL_CONTENT_CHARS = 1_000_000; // ~250k tokens of text
+const MAX_IMAGES = 20;
+
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
@@ -36,6 +43,32 @@ export async function POST(req: NextRequest) {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    // Reject oversized payloads before doing any work.
+    if (body.messages.length > MAX_MESSAGES) {
+      return new Response(
+        JSON.stringify({ error: `Too many messages (max ${MAX_MESSAGES})` }),
+        { status: 413, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    let totalChars = 0;
+    let totalImages = 0;
+    for (const m of body.messages) {
+      totalChars += typeof m.content === "string" ? m.content.length : 0;
+      totalImages += Array.isArray(m.images) ? m.images.length : 0;
+    }
+    if (totalChars > MAX_TOTAL_CONTENT_CHARS) {
+      return new Response(
+        JSON.stringify({ error: "Message content too large" }),
+        { status: 413, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    if (totalImages > MAX_IMAGES) {
+      return new Response(
+        JSON.stringify({ error: `Too many images (max ${MAX_IMAGES})` }),
+        { status: 413, headers: { "Content-Type": "application/json" } }
+      );
     }
 
     const mode: ModelMode = body.mode || "standard";

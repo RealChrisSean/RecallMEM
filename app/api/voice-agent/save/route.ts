@@ -10,6 +10,7 @@ interface VoiceAgentSaveRequest {
   messages?: Message[];
   providerId?: string | null;
   model?: string | null;
+  workspaceMode?: "chat" | "wiki" | "study" | null;
 }
 
 function cleanMessages(messages: Message[] | undefined): Message[] {
@@ -51,13 +52,15 @@ export async function POST(req: NextRequest) {
       providerId: body.providerId || null,
     });
 
-    await generateTitleIfMissing(chatId).catch((err) =>
-      console.error("[voice-agent] title generation failed:", err)
-    );
+    if (body.workspaceMode !== "wiki" && body.workspaceMode !== "study") {
+      await generateTitleIfMissing(chatId).catch((err) =>
+        console.error("[voice-agent] title generation failed:", err)
+      );
 
-    extractFactsLive(chatId).catch((err) =>
-      console.error("[voice-agent] live fact extraction failed:", err)
-    );
+      extractFactsLive(chatId).catch((err) =>
+        console.error("[voice-agent] live fact extraction failed:", err)
+      );
+    }
 
     return Response.json({ ok: true, chatId });
   } catch (err) {

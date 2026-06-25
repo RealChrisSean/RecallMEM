@@ -1,5 +1,25 @@
-import { query, queryOne, getUserId } from "@/lib/db";
+import { query, queryOne, getUserId, getBaseUserId } from "@/lib/db";
 import type { ChatRow, Message, ModelMode } from "@/lib/types";
+
+// Build an ownership predicate that scopes a chat lookup to the current
+// user across ALL of their brains. Chats are created with a brain-namespaced
+// user_id (e.g. "local-user::work"); matching on the exact namespaced id
+// caused silent data loss when the brain cookie changed between create and
+// update. Scoping to the BASE user (and any "<base>::brain" namespace)
+// keeps cross-brain resume working while still preventing another user from
+// reading/mutating a chat by guessing its id (IDOR).
+//
+// Returns the SQL fragment plus the two params to append. `startIndex` is
+// the next free positional-parameter number.
+function ownershipClause(
+  baseUserId: string,
+  startIndex: number
+): { sql: string; params: [string, string] } {
+  return {
+    sql: `(user_id = $${startIndex} OR user_id LIKE $${startIndex + 1})`,
+    params: [baseUserId, `${baseUserId}::%`],
+  };
+}
 
 // Format messages to transcript. Uses JSON to preserve usage data.
 export function messagesToTranscript(messages: Message[]): string {
@@ -66,9 +86,9 @@ export async function updateChat(
   opts: { model?: string | null; providerId?: string | null } = {}
 ): Promise<void> {
   const transcript = messagesToTranscript(messages);
-  // Match on chatId only. The user_id was set at creation time.
-  // Matching on user_id too caused silent data loss when the brain
-  // cookie changed between createChat and updateChat.
+  // Scope to the owning user (across brains) so a chat can only be
+  // overwritten by its owner, while still surviving a brain-cookie change.
+  const own = ownershipClause(await getBaseUserId(), 6);
   await query(
     `UPDATE s2m_chats
      SET transcript = $1,
@@ -76,32 +96,35 @@ export async function updateChat(
          model = COALESCE($3, model),
          provider_id = COALESCE($4::uuid, provider_id),
          updated_at = NOW()
-     WHERE id = $5`,
+     WHERE id = $5 AND ${own.sql}`,
     [
       transcript,
       messages.length,
       opts.model ?? null,
       opts.providerId ?? null,
       chatId,
+      ...own.params,
     ]
   );
 }
 
 // Set the chat title (set after auto-generation)
 export async function setChatTitle(chatId: string, title: string): Promise<void> {
+  const own = ownershipClause(await getBaseUserId(), 3);
   await query(
-    `UPDATE s2m_chats SET title = $1 WHERE id = $2`,
-    [title, chatId]
+    `UPDATE s2m_chats SET title = $1 WHERE id = $2 AND ${own.sql}`,
+    [title, chatId, ...own.params]
   );
 }
 
-// Get a single chat by id. No user_id filter — the chatId is a UUID,
-// which is unguessable. Filtering by user_id caused silent data loss
-// when the brain cookie was out of sync.
+// Get a single chat by id, scoped to the owning user (across brains).
+// The id is a UUID, but ids leak (logs, the chat list, backups), so
+// ownership is enforced here rather than relying on unguessability.
 export async function getChat(chatId: string): Promise<ChatRow | null> {
+  const own = ownershipClause(await getBaseUserId(), 2);
   return queryOne<ChatRow>(
-    `SELECT * FROM s2m_chats WHERE id = $1`,
-    [chatId]
+    `SELECT * FROM s2m_chats WHERE id = $1 AND ${own.sql}`,
+    [chatId, ...own.params]
   );
 }
 
@@ -120,17 +143,19 @@ export async function listChats(limit = 100): Promise<ChatRow[]> {
 
 // Toggle pinned state for a chat
 export async function setPinned(chatId: string, pinned: boolean): Promise<void> {
+  const own = ownershipClause(await getBaseUserId(), 3);
   await query(
-    `UPDATE s2m_chats SET is_pinned = $1 WHERE id = $2`,
-    [pinned, chatId]
+    `UPDATE s2m_chats SET is_pinned = $1 WHERE id = $2 AND ${own.sql}`,
+    [pinned, chatId, ...own.params]
   );
 }
 
 // Delete a chat (cascading: facts, chunks all get removed via FK)
 export async function deleteChat(chatId: string): Promise<void> {
+  const own = ownershipClause(await getBaseUserId(), 2);
   await query(
-    `DELETE FROM s2m_chats WHERE id = $1`,
-    [chatId]
+    `DELETE FROM s2m_chats WHERE id = $1 AND ${own.sql}`,
+    [chatId, ...own.params]
   );
 }
 

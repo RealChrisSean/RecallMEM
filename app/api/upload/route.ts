@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import path from "node:path";
 import { execSync } from "node:child_process";
-import { writeFileSync, readFileSync, readdirSync, unlinkSync, mkdirSync } from "node:fs";
+import { writeFileSync, readFileSync, readdirSync, unlinkSync, mkdirSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
@@ -12,6 +12,10 @@ import { randomUUID } from "node:crypto";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+// Hard cap on upload size. `file.arrayBuffer()` buffers the entire upload
+// into memory, so without a limit a multi-GB upload would OOM the server.
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB
 
 // Cache the worker setup so we only do it once per process
 let workerInitialized = false;
@@ -25,7 +29,28 @@ export async function POST(req: NextRequest) {
       return json({ error: "No file provided" }, 400);
     }
 
+    // Reject oversized uploads BEFORE reading the bytes into memory.
+    if (typeof file.size === "number" && file.size > MAX_UPLOAD_BYTES) {
+      return json(
+        {
+          error: `File too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Max ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB.`,
+        },
+        413
+      );
+    }
+
     const buffer = Buffer.from(await file.arrayBuffer());
+
+    // Defense-in-depth: some clients omit/lie about file.size, so re-check
+    // the actual decoded byte length.
+    if (buffer.byteLength > MAX_UPLOAD_BYTES) {
+      return json(
+        {
+          error: `File too large (${(buffer.byteLength / (1024 * 1024)).toFixed(1)} MB). Max ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB.`,
+        },
+        413
+      );
+    }
     const name = file.name;
     const lower = name.toLowerCase();
 
@@ -97,7 +122,7 @@ export async function POST(req: NextRequest) {
         try { unlinkSync(pdfPath); } catch {}
         try {
           for (const f of readdirSync(outDir)) unlinkSync(path.join(outDir, f));
-          require("node:fs").rmdirSync(outDir);
+          rmdirSync(outDir);
         } catch {}
       }
 

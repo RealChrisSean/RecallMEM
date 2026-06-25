@@ -9,6 +9,7 @@
 
 import "server-only";
 import { getProvider, type ProviderType, type ProviderRow } from "@/lib/providers";
+import { assertSafeUrl } from "@/lib/url-guard";
 import {
   type ModelMode,
   type ModelConfig,
@@ -228,12 +229,24 @@ function rowToResolved(row: ProviderRow): ResolvedProvider {
   };
 }
 
+// SSRF guard: validate a resolved provider's base URL before we fetch it.
+// Localhost/private targets are allowed ONLY for Ollama (local-first by
+// design); cloud providers must point at a public host. Throws
+// BlockedUrlError on an unsafe URL.
+async function assertProviderUrlSafe(provider: ResolvedProvider): Promise<void> {
+  if (!provider.baseUrl) return; // empty handled by the per-type checks
+  await assertSafeUrl(provider.baseUrl, {
+    allowLocalhost: provider.type === "ollama",
+  });
+}
+
 // Streaming chat. Routes to the right provider based on type.
 export async function* chatStream(
   messages: ChatMessage[],
   options: ChatOptions = {}
 ): AsyncGenerator<ChatStreamChunk> {
   const provider = await resolveProvider(options);
+  await assertProviderUrlSafe(provider);
   // Native web search only works for Anthropic (web_search_20250305).
   // OpenAI's chat completions doesn't support web_search_preview
   // (that's Responses API only). Ollama, OpenAI, and OpenAI-compatible
@@ -280,6 +293,11 @@ export async function testProvider(input: {
   if (provider.type === "openai-compatible" && !provider.baseUrl) {
     return { ok: false, error: "Base URL is required" };
   }
+  try {
+    await assertProviderUrlSafe(provider);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
   const messages: ChatMessage[] = [
     { role: "user", content: "Reply with just the word: ok" },
   ];
@@ -305,6 +323,7 @@ export async function chat(
   options: ChatOptions = {}
 ): Promise<string> {
   const provider = await resolveProvider(options);
+  await assertProviderUrlSafe(provider);
   let result: string;
   if (provider.type === "anthropic") {
     result = await anthropicNonStream(provider, messages, options.providerModelMode);
@@ -340,6 +359,7 @@ async function* ollamaStream(
 ): AsyncGenerator<ChatStreamChunk> {
   const res = await fetch(`${provider.baseUrl}/api/chat`, {
     method: "POST",
+    redirect: "error",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: provider.model,
@@ -412,6 +432,7 @@ async function ollamaNonStream(
 ): Promise<string> {
   const res = await fetch(`${provider.baseUrl}/api/chat`, {
     method: "POST",
+    redirect: "error",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: provider.model,
@@ -521,6 +542,7 @@ async function* openaiStream(
   const url = `${provider.baseUrl.replace(/\/$/, "")}/v1/chat/completions`;
   const res = await fetch(url, {
     method: "POST",
+    redirect: "error",
     headers: openaiHeaders(provider),
     body: openaiBody(provider, messages, true, providerModelMode),
   });
@@ -573,6 +595,7 @@ async function openaiNonStream(
   const url = `${provider.baseUrl.replace(/\/$/, "")}/v1/chat/completions`;
   const res = await fetch(url, {
     method: "POST",
+    redirect: "error",
     headers: openaiHeaders(provider),
     body: openaiBody(provider, messages, false, providerModelMode),
   });
@@ -694,6 +717,7 @@ async function* anthropicStream(
   const url = `${provider.baseUrl.replace(/\/$/, "")}/v1/messages`;
   const res = await fetch(url, {
     method: "POST",
+    redirect: "error",
     headers: anthropicHeaders(provider),
     body: anthropicBody(provider, messages, true, webSearch, providerModelMode),
   });
@@ -750,6 +774,7 @@ async function anthropicNonStream(
   const url = `${provider.baseUrl.replace(/\/$/, "")}/v1/messages`;
   const res = await fetch(url, {
     method: "POST",
+    redirect: "error",
     headers: anthropicHeaders(provider),
     body: anthropicBody(provider, messages, false, false, providerModelMode),
   });
