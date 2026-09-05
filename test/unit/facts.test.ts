@@ -5,6 +5,7 @@ import {
   hasUngroundedRelativeTime,
   matchesKeyword,
   quoteAppearsInTranscript,
+  reviewRequirementForFact,
   validateExtractedFactCandidates,
 } from "@/lib/facts";
 
@@ -63,6 +64,30 @@ describe("FACT_CATEGORIES sanity", () => {
   it("has 'other' as the catch-all", async () => {
     const { FACT_CATEGORIES } = await import("@/lib/facts");
     expect(FACT_CATEGORIES[FACT_CATEGORIES.length - 1]).toBe("other");
+  });
+});
+
+describe("memory review policy", () => {
+  it("requires confirmation for sensitive claims", () => {
+    expect(reviewRequirementForFact("identity", [])).toBe(
+      "Sensitive memory requires your confirmation."
+    );
+    expect(reviewRequirementForFact("health", [])).toBe(
+      "Sensitive memory requires your confirmation."
+    );
+  });
+
+  it("requires confirmation before replacing an active claim", () => {
+    expect(
+      reviewRequirementForFact("project", [
+        "11111111-1111-1111-1111-111111111111",
+      ])
+    ).toBe("This claim would replace an existing memory.");
+  });
+
+  it("allows lower-risk evidence-backed claims through policy", () => {
+    expect(reviewRequirementForFact("project", [])).toBeNull();
+    expect(reviewRequirementForFact("interest", [])).toBeNull();
   });
 });
 

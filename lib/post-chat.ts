@@ -2,8 +2,7 @@ import { chat as llmChat, getCheapestLLM } from "@/lib/llm";
 import { setChatTitle, getChat } from "@/lib/chats";
 import {
   extractFactsWithSupersession,
-  markFactsSuperseded,
-  storeFacts,
+  storeFactProposals,
   recategorizeAllFacts,
 } from "@/lib/facts";
 import { rebuildProfile } from "@/lib/profile";
@@ -28,7 +27,7 @@ export async function runPostChatPipeline(chatId: string): Promise<void> {
       }
     }
 
-    // 2. Extract facts + supersede stale ones (skip very short conversations).
+    // 2. Extract facts and store replacements as reviewable proposals.
     // Use whichever model + provider was last used for this chat so cloud
     // users get extraction via their cloud provider and local users get
     // free local extraction. Falls back to FAST_MODEL via Ollama if the
@@ -36,18 +35,19 @@ export async function runPostChatPipeline(chatId: string): Promise<void> {
     if (chatRow.message_count >= 4 && chatRow.transcript.length >= 200) {
       try {
         const cheapLLM = await getCheapestLLM();
-        const { facts, supersedes } = await extractFactsWithSupersession(
+        const { facts } = await extractFactsWithSupersession(
           chatRow.transcript,
           { ...cheapLLM, conversationDate: chatRow.updated_at || chatRow.created_at }
         );
-        const retired = await markFactsSuperseded(supersedes, chatId);
-        const inserted = facts.length > 0 ? await storeFacts(facts, chatId) : 0;
+        const stored = facts.length > 0
+          ? await storeFactProposals(facts, chatId)
+          : { inserted: 0, active: 0, pending: 0 };
         console.log(
-          `[post-chat] extracted ${facts.length}, inserted ${inserted}, retired ${retired}`
+          `[post-chat] extracted ${facts.length}, inserted ${stored.inserted}, active ${stored.active}, pending ${stored.pending}`
         );
 
-        // 3. Rebuild profile if anything changed
-        if (inserted > 0 || retired > 0) {
+        // 3. Only active facts participate in the synthesized profile.
+        if (stored.active > 0) {
           const moved = await recategorizeAllFacts();
           if (moved > 0) console.log(`[post-chat] recategorized ${moved} facts`);
           await rebuildProfile();
@@ -131,18 +131,24 @@ export async function extractFactsLive(
     );
     extractSpan?.end({ output: { facts, supersedes } });
 
-    const retired = await markFactsSuperseded(supersedes, chatId);
-    const inserted = facts.length > 0 ? await storeFacts(facts, chatId) : 0;
+    const stored = facts.length > 0
+      ? await storeFactProposals(facts, chatId)
+      : { inserted: 0, active: 0, pending: 0 };
     console.log(
-      `[live-facts] extracted ${facts.length} new, inserted ${inserted}, retired ${retired}`
+      `[live-facts] extracted ${facts.length} new, inserted ${stored.inserted}, active ${stored.active}, pending ${stored.pending}`
     );
-    if (inserted > 0 || retired > 0) {
+    if (stored.active > 0) {
       const moved = await recategorizeAllFacts();
       if (moved > 0) console.log(`[live-facts] recategorized ${moved}`);
       await rebuildProfile();
     }
     trace?.update({
-      output: { factsExtracted: facts.length, inserted, retired },
+      output: {
+        factsExtracted: facts.length,
+        inserted: stored.inserted,
+        active: stored.active,
+        pending: stored.pending,
+      },
     });
   } catch (err) {
     trace?.update({

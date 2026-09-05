@@ -1,10 +1,20 @@
 import { NextRequest } from "next/server";
-import { hardDeleteFact, updateFact, recategorizeAllFacts, type FactCategory, FACT_CATEGORIES } from "@/lib/facts";
+import {
+  hardDeleteFact,
+  updateFact,
+  recategorizeAllFacts,
+  reviewFact,
+  type FactCategory,
+  type FactReviewAction,
+  FACT_CATEGORIES,
+} from "@/lib/facts";
 import { rebuildProfile } from "@/lib/profile";
 
 export const runtime = "nodejs";
 
-// Update a fact's text and/or category, then rebuild profile
+const REVIEW_ACTIONS: FactReviewAction[] = ["confirm", "dispute", "retire", "restore"];
+
+// Review a claim or edit it directly, then rebuild the active profile.
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -14,7 +24,22 @@ export async function PATCH(
     const body = (await req.json()) as {
       fact_text?: string;
       category?: string;
+      action?: string;
     };
+
+    if (body.action) {
+      if (!REVIEW_ACTIONS.includes(body.action as FactReviewAction)) {
+        return new Response(JSON.stringify({ error: "Invalid review action" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const result = await reviewFact(id, body.action as FactReviewAction);
+      await rebuildProfile();
+      return new Response(JSON.stringify({ ok: true, ...result }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
     if (!body.fact_text || !body.fact_text.trim()) {
       return new Response(JSON.stringify({ error: "fact_text required" }), {
@@ -37,8 +62,13 @@ export async function PATCH(
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
+    const status = message === "Memory not found"
+      ? 404
+      : message.startsWith("Cannot ")
+        ? 409
+        : 500;
     return new Response(JSON.stringify({ error: message }), {
-      status: 500,
+      status,
       headers: { "Content-Type": "application/json" },
     });
   }

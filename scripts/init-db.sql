@@ -29,11 +29,31 @@ CREATE TABLE IF NOT EXISTS s2m_user_facts (
   source_chat_id  UUID REFERENCES s2m_chats(id) ON DELETE CASCADE,
   is_active       BOOLEAN NOT NULL DEFAULT TRUE,
   superseded_by   UUID REFERENCES s2m_user_facts(id) ON DELETE SET NULL,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  status          TEXT NOT NULL DEFAULT 'active'
+                  CHECK (status IN ('active', 'pending', 'disputed', 'retired')),
+  recall_eligible BOOLEAN NOT NULL DEFAULT TRUE,
+  origin          TEXT NOT NULL DEFAULT 'model',
+  confirmed_by    TEXT,
+  review_reason   TEXT,
+  reviewed_at     TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_s2m_facts_user_active ON s2m_user_facts (user_id, is_active, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_s2m_facts_category ON s2m_user_facts (user_id, category) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_s2m_facts_user_status ON s2m_user_facts (user_id, status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS s2m_fact_supersession_proposals (
+  old_fact_id         UUID NOT NULL REFERENCES s2m_user_facts(id) ON DELETE CASCADE,
+  replacement_fact_id UUID NOT NULL REFERENCES s2m_user_facts(id) ON DELETE CASCADE,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (old_fact_id, replacement_fact_id),
+  CHECK (old_fact_id <> replacement_fact_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_s2m_fact_proposals_replacement
+  ON s2m_fact_supersession_proposals (replacement_fact_id);
 
 -- Synthesized profile (compact summary the LLM sees every conversation)
 CREATE TABLE IF NOT EXISTS s2m_user_profiles (

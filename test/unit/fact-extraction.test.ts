@@ -103,10 +103,55 @@ describe("extractFactsWithSupersession", () => {
           text: "User said on 2026-05-23 that their job starts around 2026-06-23.",
           supportingQuote: "My job starts in 1 month.",
           sourceMessageIndex: null,
+          supersedes: ["11111111-1111-1111-1111-111111111111"],
         },
       ],
       supersedes: ["11111111-1111-1111-1111-111111111111"],
     });
+  });
+
+  it("keeps replacement ids attached to the specific proposed fact", async () => {
+    mocks.query.mockResolvedValue([
+      {
+        id: "11111111-1111-1111-1111-111111111111",
+        fact_text: "User works at Acme.",
+      },
+      {
+        id: "22222222-2222-2222-2222-222222222222",
+        fact_text: "User lives in Boston.",
+      },
+    ]);
+    mocks.chat.mockResolvedValue(
+      JSON.stringify({
+        facts: [
+          {
+            text: "User left Acme in 2026.",
+            quote: "I left Acme in 2026.",
+            supersedes: [
+              "11111111-1111-1111-1111-111111111111",
+              "33333333-3333-3333-3333-333333333333",
+            ],
+          },
+          {
+            text: "User is learning Rust.",
+            quote: "I am learning Rust.",
+          },
+        ],
+      })
+    );
+
+    const result = await extractFactsWithSupersession(
+      `user: I left Acme in 2026. I am learning Rust.\nassistant: Understood.${filler}`,
+      { conversationDate: "2026-05-23" }
+    );
+
+    expect(result.facts[0]?.supersedes).toEqual([
+      "11111111-1111-1111-1111-111111111111",
+    ]);
+    expect(result.facts[1]?.supersedes).toBeUndefined();
+    expect(result.supersedes).toEqual([
+      "11111111-1111-1111-1111-111111111111",
+    ]);
   });
 
   it("returns empty results when the model does not return JSON", async () => {

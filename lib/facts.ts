@@ -23,6 +23,7 @@ export interface ExtractedFactCandidate {
   text: string;
   supportingQuote: string;
   sourceMessageIndex?: number | null;
+  supersedes?: string[];
 }
 
 type FactInput = string | ExtractedFactCandidate;
@@ -33,6 +34,25 @@ export type FactSearchResult = UserFactRow & {
 };
 
 const MIN_SUPPORTING_QUOTE_LENGTH = 8;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const REVIEW_REQUIRED_CATEGORIES = new Set<FactCategory>([
+  "identity",
+  "family",
+  "finance",
+  "health",
+]);
+
+export type FactReviewAction = "confirm" | "dispute" | "retire" | "restore";
+
+export interface StoredFactResult {
+  inserted: number;
+  active: number;
+  pending: number;
+}
+
+export interface InspectableFactRow extends UserFactRow {
+  proposed_replacements: { id: string; fact_text: string }[];
+}
 
 const RELATIVE_TIME_PATTERNS = [
   /\b(today|tonight|yesterday|tomorrow|overnight)\b/i,
@@ -159,6 +179,19 @@ function categorize(fact: string): FactCategory {
   return "other";
 }
 
+export function reviewRequirementForFact(
+  category: FactCategory,
+  supersedes: string[] = []
+): string | null {
+  if (supersedes.length > 0) {
+    return "This claim would replace an existing memory.";
+  }
+  if (REVIEW_REQUIRED_CATEGORIES.has(category)) {
+    return "Sensitive memory requires your confirmation.";
+  }
+  return null;
+}
+
 // Reject obviously bad facts (meta-observations, non-facts, AI commentary)
 const GARBAGE_PATTERNS = [
   /^user\s+(tested|asked|checked|wanted to see)/i,
@@ -208,6 +241,7 @@ function parseCandidateFact(raw: unknown): ExtractedFactCandidate | null {
     supporting_quote?: unknown;
     source_message_index?: unknown;
     sourceMessageIndex?: unknown;
+    supersedes?: unknown;
   };
   const text = typeof candidate.text === "string"
     ? candidate.text.trim()
@@ -224,9 +258,19 @@ function parseCandidateFact(raw: unknown): ExtractedFactCandidate | null {
     : typeof candidate.sourceMessageIndex === "number"
       ? candidate.sourceMessageIndex
     : null;
+  const supersedes = Array.isArray(candidate.supersedes)
+    ? candidate.supersedes.filter(
+        (id): id is string => typeof id === "string" && UUID_PATTERN.test(id)
+      )
+    : [];
 
   if (!text || !supportingQuote) return null;
-  return { text, supportingQuote, sourceMessageIndex };
+  return {
+    text,
+    supportingQuote,
+    sourceMessageIndex,
+    ...(supersedes.length > 0 ? { supersedes } : {}),
+  };
 }
 
 export function validateExtractedFactCandidates(
@@ -256,6 +300,7 @@ function normalizeFactInput(fact: FactInput): ExtractedFactCandidate {
     text: fact.text.trim(),
     supportingQuote: fact.supportingQuote.trim(),
     sourceMessageIndex: fact.sourceMessageIndex ?? null,
+    ...(fact.supersedes?.length ? { supersedes: fact.supersedes } : {}),
   };
 }
 
@@ -359,7 +404,10 @@ export async function extractFactsWithSupersession(
   const userId = await getUserId();
   const active = await query<{ id: string; fact_text: string }>(
     `SELECT id, fact_text FROM s2m_user_facts
-     WHERE user_id = $1 AND is_active = TRUE
+     WHERE user_id = $1
+       AND is_active = TRUE
+       AND status = 'active'
+       AND recall_eligible = TRUE
      ORDER BY created_at DESC LIMIT 200`,
     [userId]
   );
@@ -396,7 +444,9 @@ SUPERSEDE existing facts when the new conversation makes them no longer true:
 - Be conservative: only mark a fact superseded if the new information clearly replaces it. If both can still be true (e.g. "User likes coffee" + "User likes tea"), do NOT supersede.
 
 Return ONLY this JSON object, no commentary, no code blocks:
-{"facts": [{"text": "User lives in Los Angeles", "quote": "I live in Los Angeles"}], "supersedes": ["uuid-of-old-fact"]}
+{"facts": [{"text": "User lives in Los Angeles", "quote": "I live in Los Angeles", "supersedes": ["uuid-of-old-fact"]}]}
+
+Put each replaced fact ID on the specific new fact that replaces it. Do not return a separate top-level supersedes list.
 
 The quote must be copied from the transcript. If the quote is missing or changed, the app will reject the fact.
 For relative time, keep the quote exact but ground the fact text:
@@ -423,12 +473,25 @@ Return the JSON object now:`;
     const match = cleaned.match(/\{[\s\S]*\}/);
     if (!match) return { facts: [], supersedes: [] };
     const parsed = JSON.parse(match[0]) as { facts?: unknown; supersedes?: unknown };
-    const facts = validateExtractedFactCandidates(parsed.facts, transcript);
-    const supersedes = Array.isArray(parsed.supersedes)
+    let facts = validateExtractedFactCandidates(parsed.facts, transcript);
+    const legacySupersedes = Array.isArray(parsed.supersedes)
       ? parsed.supersedes
-          .filter((id): id is string => typeof id === "string")
+          .filter((id): id is string => typeof id === "string" && UUID_PATTERN.test(id))
           .filter((id) => active.some((a) => a.id === id))
       : [];
+    if (legacySupersedes.length > 0 && facts.length === 1 && !facts[0].supersedes?.length) {
+      facts = [{ ...facts[0], supersedes: legacySupersedes }];
+    }
+    facts = facts.map((fact) => {
+      const supersedes = (fact.supersedes || []).filter((id) =>
+        active.some((candidate) => candidate.id === id)
+      );
+      return supersedes.length > 0 ? { ...fact, supersedes } : fact;
+    });
+    const supersedes = [...new Set([
+      ...legacySupersedes,
+      ...facts.flatMap((fact) => fact.supersedes || []),
+    ])];
     return { facts, supersedes };
   } catch (err) {
     console.error("[facts] extract+supersede failed:", err);
@@ -446,7 +509,11 @@ export async function markFactsSuperseded(
   const userId = await getUserId();
   const result = await query(
     `UPDATE s2m_user_facts
-     SET is_active = FALSE, valid_to = NOW()
+     SET is_active = FALSE,
+         status = 'retired',
+         recall_eligible = FALSE,
+         valid_to = NOW(),
+         updated_at = NOW()
      WHERE user_id = $1 AND id = ANY($2::uuid[]) AND is_active = TRUE`,
     [userId, factIds]
   );
@@ -515,12 +582,277 @@ export async function storeFacts(
   return inserted;
 }
 
+// Store model-extracted claims under a deterministic review policy. Sensitive
+// claims and replacements stay pending; lower-risk, evidence-backed claims can
+// become recallable immediately. Supersession links are only applied after a
+// user confirms the replacement in the Memory review inbox.
+export async function storeFactProposals(
+  facts: ExtractedFactCandidate[],
+  sourceChatId: string
+): Promise<StoredFactResult> {
+  if (facts.length === 0) return { inserted: 0, active: 0, pending: 0 };
+  const userId = await getUserId();
+  const existing = await query<{ fact_text: string }>(
+    `SELECT fact_text FROM s2m_user_facts
+     WHERE user_id = $1 AND status IN ('active', 'pending')`,
+    [userId]
+  );
+  const existingSet = new Set(existing.map((row) => row.fact_text.toLowerCase().trim()));
+
+  const prepared: Array<{
+    fact: ExtractedFactCandidate;
+    category: FactCategory;
+    reviewReason: string | null;
+    embedding: string | null;
+    embeddingColumn: "embedding" | "embedding_oai";
+  }> = [];
+
+  for (const rawFact of facts) {
+    const fact = normalizeFactInput(rawFact);
+    if (!fact.text || isGarbage(fact.text) || !fact.supportingQuote) continue;
+    const normalized = fact.text.toLowerCase().trim();
+    if (existingSet.has(normalized)) continue;
+    existingSet.add(normalized);
+
+    const category = categorize(fact.text);
+    const supersedes = (fact.supersedes || []).filter((id) => UUID_PATTERN.test(id));
+    const normalizedFact = supersedes.length > 0 ? { ...fact, supersedes } : fact;
+    let embedding: string | null = null;
+    let embeddingColumn: "embedding" | "embedding_oai" = "embedding";
+    try {
+      const result = await embedWithSource(fact.text);
+      embedding = toVectorString(result.vector);
+      embeddingColumn = result.source === "openai" ? "embedding_oai" : "embedding";
+    } catch {
+      // Evidence and review state remain useful even when embeddings are offline.
+    }
+    prepared.push({
+      fact: normalizedFact,
+      category,
+      reviewReason: reviewRequirementForFact(category, supersedes),
+      embedding,
+      embeddingColumn,
+    });
+  }
+
+  if (prepared.length === 0) return { inserted: 0, active: 0, pending: 0 };
+
+  const { getPool } = await import("@/lib/db");
+  const client = await getPool().connect();
+  let active = 0;
+  let pending = 0;
+  try {
+    await client.query("BEGIN");
+    for (const item of prepared) {
+      const status = item.reviewReason ? "pending" : "active";
+      const recallEligible = status === "active";
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO s2m_user_facts (
+           user_id, fact_text, category, source_chat_id, is_active,
+           supporting_quote, source_message_index, status, recall_eligible,
+           origin, confirmed_by, review_reason, ${item.embeddingColumn}
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'model', $10, $11, $12::vector)
+         RETURNING id`,
+        [
+          userId,
+          item.fact.text,
+          item.category,
+          sourceChatId,
+          recallEligible,
+          item.fact.supportingQuote,
+          item.fact.sourceMessageIndex ?? null,
+          status,
+          recallEligible,
+          recallEligible ? "policy" : null,
+          item.reviewReason,
+          item.embedding,
+        ]
+      );
+      const replacementId = inserted.rows[0]?.id;
+      if (!replacementId) throw new Error("Failed to store memory proposal");
+
+      if (item.fact.supersedes?.length) {
+        await client.query(
+          `INSERT INTO s2m_fact_supersession_proposals (old_fact_id, replacement_fact_id)
+           SELECT f.id, $1::uuid
+           FROM s2m_user_facts f
+           WHERE f.user_id = $2
+             AND f.id = ANY($3::uuid[])
+             AND f.status = 'active'
+           ON CONFLICT DO NOTHING`,
+          [replacementId, userId, item.fact.supersedes]
+        );
+      }
+      if (recallEligible) active++;
+      else pending++;
+    }
+    await client.query("COMMIT");
+    return { inserted: prepared.length, active, pending };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getFactsForInspector(limit = 1000): Promise<InspectableFactRow[]> {
+  const userId = await getUserId();
+  return query<InspectableFactRow>(
+    `SELECT f.*,
+            COALESCE(
+              json_agg(json_build_object('id', old.id, 'fact_text', old.fact_text))
+                FILTER (WHERE old.id IS NOT NULL),
+              '[]'::json
+            ) AS proposed_replacements
+     FROM s2m_user_facts f
+     LEFT JOIN s2m_fact_supersession_proposals proposal
+       ON proposal.replacement_fact_id = f.id
+     LEFT JOIN s2m_user_facts old ON old.id = proposal.old_fact_id
+     WHERE f.user_id = $1
+     GROUP BY f.id
+     ORDER BY
+       CASE f.status WHEN 'pending' THEN 0 WHEN 'active' THEN 1 ELSE 2 END,
+       f.updated_at DESC
+     LIMIT $2`,
+    [userId, limit]
+  );
+}
+
+export async function reviewFact(
+  factId: string,
+  action: FactReviewAction
+): Promise<{ status: UserFactRow["status"]; retired: number }> {
+  const userId = await getUserId();
+  const { getPool } = await import("@/lib/db");
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const selected = await client.query<
+      Pick<UserFactRow, "id" | "status" | "superseded_by">
+    >(
+      `SELECT id, status, superseded_by FROM s2m_user_facts
+       WHERE id = $1 AND user_id = $2
+       FOR UPDATE`,
+      [factId, userId]
+    );
+    if (!selected.rows[0]) throw new Error("Memory not found");
+    const currentStatus = selected.rows[0].status;
+    const validAction =
+      (action === "confirm" && currentStatus === "pending") ||
+      (action === "dispute" && currentStatus === "pending") ||
+      (action === "retire" && currentStatus === "active") ||
+      (action === "restore" &&
+        (currentStatus === "retired" || currentStatus === "disputed"));
+    if (!validAction) {
+      throw new Error(`Cannot ${action} a ${currentStatus} memory`);
+    }
+
+    let status: UserFactRow["status"];
+    let retired = 0;
+    if (action === "confirm") {
+      status = "active";
+      const retiredRows = await client.query<{ id: string }>(
+        `UPDATE s2m_user_facts old
+         SET is_active = FALSE,
+             status = 'retired',
+             recall_eligible = FALSE,
+             valid_to = NOW(),
+             superseded_by = $1,
+             updated_at = NOW()
+         FROM s2m_fact_supersession_proposals proposal
+         WHERE proposal.replacement_fact_id = $1
+           AND proposal.old_fact_id = old.id
+           AND old.user_id = $2
+           AND old.status = 'active'
+         RETURNING old.id`,
+        [factId, userId]
+      );
+      retired = retiredRows.rowCount || 0;
+      await client.query(
+        `UPDATE s2m_user_facts
+         SET is_active = TRUE,
+             status = 'active',
+             recall_eligible = TRUE,
+             confirmed_by = 'user',
+             review_reason = NULL,
+             reviewed_at = NOW(),
+             valid_to = NULL,
+             updated_at = NOW()
+         WHERE id = $1 AND user_id = $2`,
+        [factId, userId]
+      );
+    } else if (action === "restore") {
+      status = "active";
+      if (selected.rows[0].superseded_by) {
+        const retiredRows = await client.query<{ id: string }>(
+          `UPDATE s2m_user_facts
+           SET is_active = FALSE,
+               status = 'retired',
+               recall_eligible = FALSE,
+               valid_to = NOW(),
+               superseded_by = $1,
+               updated_at = NOW()
+           WHERE id = $3
+             AND user_id = $2
+             AND status = 'active'
+           RETURNING id`,
+          [factId, userId, selected.rows[0].superseded_by]
+        );
+        retired = retiredRows.rowCount || 0;
+      }
+      await client.query(
+        `UPDATE s2m_user_facts
+         SET is_active = TRUE,
+             status = 'active',
+             recall_eligible = TRUE,
+             confirmed_by = 'user',
+             review_reason = NULL,
+             reviewed_at = NOW(),
+             valid_to = NULL,
+             superseded_by = NULL,
+             updated_at = NOW()
+         WHERE id = $1 AND user_id = $2`,
+        [factId, userId]
+      );
+    } else {
+      status = action === "dispute" ? "disputed" : "retired";
+      await client.query(
+        `UPDATE s2m_user_facts
+         SET is_active = FALSE,
+             status = $3,
+             recall_eligible = FALSE,
+             confirmed_by = CASE WHEN $3 = 'disputed' THEN 'user' ELSE confirmed_by END,
+             review_reason = CASE WHEN $3 = 'disputed' THEN 'Disputed by user.' ELSE review_reason END,
+             reviewed_at = NOW(),
+             valid_to = CASE WHEN $3 = 'retired' THEN NOW() ELSE valid_to END,
+             updated_at = NOW()
+         WHERE id = $1 AND user_id = $2`,
+        [factId, userId, status]
+      );
+    }
+
+    await client.query(
+      `DELETE FROM s2m_fact_supersession_proposals WHERE replacement_fact_id = $1`,
+      [factId]
+    );
+    await client.query("COMMIT");
+    return { status, retired };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // Get all active facts for the user
 export async function getActiveFacts(limit = 200): Promise<UserFactRow[]> {
   const userId = await getUserId();
   return query<UserFactRow>(
     `SELECT * FROM s2m_user_facts
-     WHERE user_id = $1 AND is_active = TRUE
+     WHERE user_id = $1 AND is_active = TRUE AND status = 'active' AND recall_eligible = TRUE
      ORDER BY created_at DESC
      LIMIT $2`,
     [userId, limit]
@@ -554,6 +886,8 @@ export async function searchFactsKeyword(
      FROM s2m_user_facts f, needle
      WHERE f.user_id = $1
        AND f.is_active = TRUE
+       AND f.status = 'active'
+       AND f.recall_eligible = TRUE
        AND (
          to_tsvector('simple', coalesce(f.fact_text, '') || ' ' || coalesce(f.supporting_quote, '')) @@ needle.query
          OR f.fact_text ILIKE $3 ESCAPE '\\'
@@ -595,7 +929,11 @@ export async function searchFacts(
               NULL::real AS text_rank,
               'semantic' AS match_reason
        FROM s2m_user_facts
-       WHERE user_id = $2 AND is_active = TRUE AND ${col} IS NOT NULL
+       WHERE user_id = $2
+         AND is_active = TRUE
+         AND status = 'active'
+         AND recall_eligible = TRUE
+         AND ${col} IS NOT NULL
        ORDER BY distance ASC
        LIMIT $3`,
       [vector, userId, limit]
@@ -621,7 +959,11 @@ export async function getPinnedFacts(limit = 30): Promise<UserFactRow[]> {
   const userId = await getUserId();
   return query<UserFactRow>(
     `SELECT * FROM s2m_user_facts
-     WHERE user_id = $1 AND is_active = TRUE AND category = ANY($2)
+     WHERE user_id = $1
+       AND is_active = TRUE
+       AND status = 'active'
+       AND recall_eligible = TRUE
+       AND category = ANY($2)
      ORDER BY created_at DESC
      LIMIT $3`,
     [userId, PINNED_CATEGORIES, limit]
@@ -679,7 +1021,14 @@ export async function getSmartFacts(
 export async function deleteFact(factId: string): Promise<void> {
   const userId = await getUserId();
   await query(
-    `UPDATE s2m_user_facts SET is_active = FALSE WHERE id = $1 AND user_id = $2`,
+    `UPDATE s2m_user_facts
+     SET is_active = FALSE,
+         status = 'retired',
+         recall_eligible = FALSE,
+         valid_to = NOW(),
+         reviewed_at = NOW(),
+         updated_at = NOW()
+     WHERE id = $1 AND user_id = $2`,
     [factId, userId]
   );
 }
@@ -799,7 +1148,7 @@ export async function recategorizeAllFacts(): Promise<number> {
   const userId = await getUserId();
   const rows = await query<{ id: string; fact_text: string; category: string }>(
     `SELECT id, fact_text, category FROM s2m_user_facts
-     WHERE user_id = $1 AND is_active = TRUE`,
+     WHERE user_id = $1 AND is_active = TRUE AND status = 'active' AND recall_eligible = TRUE`,
     [userId]
   );
   let updated = 0;
@@ -826,7 +1175,19 @@ export async function updateFact(
   const category = newCategory || categorize(newText);
   await query(
     `UPDATE s2m_user_facts
-     SET fact_text = $1, category = $2
+     SET fact_text = $1,
+         category = $2,
+         supporting_quote = NULL,
+         source_message_index = NULL,
+         origin = 'user',
+         confirmed_by = 'user',
+         status = 'active',
+         is_active = TRUE,
+         recall_eligible = TRUE,
+         review_reason = NULL,
+         reviewed_at = NOW(),
+         valid_to = NULL,
+         updated_at = NOW()
      WHERE id = $3 AND user_id = $4`,
     [newText, category, factId, userId]
   );

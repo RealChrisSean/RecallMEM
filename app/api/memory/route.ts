@@ -1,16 +1,24 @@
-import { getActiveFacts, wipeAllMemory, nukeEverything } from "@/lib/facts";
+import { getFactsForInspector, wipeAllMemory, nukeEverything } from "@/lib/facts";
 import { getProfile, rebuildProfile } from "@/lib/profile";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-// Returns the synthesized profile + all active facts (grouped by category on the client)
+// Returns the synthesized profile plus the complete, inspectable claim history.
 export async function GET() {
   try {
     const [profile, facts] = await Promise.all([
       getProfile(),
-      getActiveFacts(1000),
+      getFactsForInspector(1000),
     ]);
+    const counts = facts.reduce(
+      (result, fact) => {
+        result[fact.status]++;
+        result.total++;
+        return result;
+      },
+      { active: 0, pending: 0, disputed: 0, retired: 0, total: 0 }
+    );
 
     return new Response(
       JSON.stringify({
@@ -23,9 +31,21 @@ export async function GET() {
           source_chat_id: f.source_chat_id,
           supporting_quote: f.supporting_quote,
           source_message_index: f.source_message_index,
+          status: f.status,
+          recall_eligible: f.recall_eligible,
+          origin: f.origin,
+          confirmed_by: f.confirmed_by,
+          review_reason: f.review_reason,
+          reviewed_at: f.reviewed_at,
+          valid_from: f.valid_from,
+          valid_to: f.valid_to,
+          updated_at: f.updated_at,
+          proposed_replacements: f.proposed_replacements,
           created_at: f.created_at,
         })),
-        totalFacts: facts.length,
+        totalFacts: counts.active,
+        totalClaims: counts.total,
+        counts,
       }),
       { headers: { "Content-Type": "application/json" } }
     );

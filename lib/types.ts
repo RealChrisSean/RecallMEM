@@ -1,6 +1,7 @@
 // Core types for RecallMEM
 
 export type ModelMode = "standard" | "unrestricted";
+export type FactStatus = "active" | "pending" | "disputed" | "retired";
 
 export interface ChatRow {
   id: string;
@@ -29,7 +30,14 @@ export interface UserFactRow {
   superseded_by: string | null;
   supporting_quote: string | null;
   source_message_index: number | null;
+  status: FactStatus;
+  recall_eligible: boolean;
+  origin: string;
+  confirmed_by: string | null;
+  review_reason: string | null;
+  reviewed_at: Date | null;
   created_at: Date;
+  updated_at: Date;
   valid_from: Date;
   valid_to: Date | null;
 }
