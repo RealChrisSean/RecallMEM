@@ -68,7 +68,7 @@ You can run it three ways:
 - **Voice input + TTS** for normal chat: dictate into the composer, or have assistant messages read aloud through Deepgram Aura-2, xAI Grok, OpenAI HD, or free browser voices.
 - **Custom rules** for how you want the AI to talk to you
 - **File uploads** (images, PDFs, code). PDFs are rendered page-by-page as images so the LLM sees charts and diagrams, not just extracted text.
-- **Web search** when using Anthropic or Ollama (via Brave Search)
+- **Web search** through Anthropic's native tool or Brave Search for Ollama, OpenAI, and compatible providers
 - **Usage tracking** with estimated costs for chat, TTS, and STT across all providers
 - **Wipe memory unrecoverably** with `DELETE` + `VACUUM FULL` + `CHECKPOINT`
 - **Bring any LLM.** Ollama, Anthropic, OpenAI, xAI (Grok), or any OpenAI-compatible API.
@@ -185,7 +185,7 @@ Wire in your own auth with two calls at startup and every lib function respects 
 
 ## Limitations (v0.2)
 
-No multi-user auth layer. No native mobile app. Live voice needs a Deepgram key and a fast supported cloud model. GPT Pro/deep and Claude adaptive modes are text-chat features, while Voice Agent keeps itself on fast compatible models. Fact supersession is LLM-judged and intentionally conservative. See the [full limitations list](./docs/LIMITATIONS.md).
+No multi-user auth layer. No native mobile app. Live voice needs a Deepgram key and a fast supported cloud model. GPT deep/max and Claude adaptive modes are text-chat features, while Voice Agent keeps itself on instant compatible models. Fact supersession is LLM-judged and intentionally conservative. See the [full limitations list](./docs/LIMITATIONS.md).
 
 ## Contributing
 

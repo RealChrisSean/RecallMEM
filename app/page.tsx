@@ -8,13 +8,17 @@ import type { ModelMode, Message, AttachedFile } from "@/lib/types";
 import {
   DEFAULT_PROVIDER_MODEL_MODE,
   MODEL_OPTIONS,
+  PROVIDER_MODEL_OPTIONS,
   isProviderModelMode,
+  migrateProviderModelSelection,
   type ModelId,
   type ProviderModelMode,
 } from "@/lib/llm-config";
 import {
+  BUNDLED_DEEPGRAM_VOICE_THINK_MODELS,
   formatVoiceAgentSupportedModels,
   getDeepgramVoiceAgentCompatibility,
+  type DeepgramVoiceThinkModel,
 } from "@/lib/voice-agent-models";
 import { AppFooter } from "@/components/AppFooter";
 import { Logo } from "@/components/Logo";
@@ -129,6 +133,9 @@ export default function ChatPage() {
   const [selectedProviderModel, setSelectedProviderModel] = useState<string | null>(null);
   const [selectedProviderModelMode, setSelectedProviderModelMode] =
     useState<ProviderModelMode>(DEFAULT_PROVIDER_MODEL_MODE);
+  const [voiceThinkModels, setVoiceThinkModels] = useState<DeepgramVoiceThinkModel[]>(
+    BUNDLED_DEEPGRAM_VOICE_THINK_MODELS.map((model) => ({ ...model }))
+  );
   const [customProviders, setCustomProviders] = useState<ProviderListItem[]>([]);
   const [providersLoaded, setProvidersLoaded] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -705,7 +712,7 @@ export default function ChatPage() {
     providerModel: selectedVoiceProvider?.model,
     selectedModel: selectedVoiceModel,
     selectedModelMode: selectedProviderModelMode,
-  });
+  }, voiceThinkModels);
   const voiceAgentDisabledReason = voiceAgentCompatibility.compatible
     ? null
     : voiceAgentCompatibility.reason;
@@ -1071,14 +1078,41 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    fetch("/api/voice-agent/models")
+      .then((response) => response.ok ? response.json() : null)
+      .then((body: { models?: DeepgramVoiceThinkModel[] } | null) => {
+        if (!cancelled && body?.models?.length) setVoiceThinkModels(body.models);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!providersLoaded || !selectedProviderId) return;
-    if (!customProviders.some((p) => p.id === selectedProviderId)) {
+    const provider = customProviders.find((p) => p.id === selectedProviderId);
+    if (!provider) {
       setSelectedProviderId(null);
       setSelectedProviderModel(null);
       setSelectedProviderModelMode(DEFAULT_PROVIDER_MODEL_MODE);
       localStorage.setItem(MODEL_STORAGE_KEY, `ollama:${selectedModel}`);
+      return;
     }
-  }, [customProviders, providersLoaded, selectedModel, selectedProviderId]);
+    const sourceModel = selectedProviderModel || provider.model;
+    if (sourceModel) {
+      const migrated = migrateProviderModelSelection(
+        provider.type,
+        sourceModel,
+        selectedProviderModelMode
+      );
+      if (migrated.model !== selectedProviderModel || migrated.mode !== selectedProviderModelMode) {
+        setSelectedProviderModel(migrated.model);
+        setSelectedProviderModelMode(migrated.mode);
+      }
+    }
+  }, [customProviders, providersLoaded, selectedModel, selectedProviderId, selectedProviderModel, selectedProviderModelMode]);
 
   // Keep ref in sync so the beforeunload handler can read the latest value
   useEffect(() => {
@@ -3481,42 +3515,6 @@ function ModeToggle({
   );
 }
 
-// Known models per provider type. One API key unlocks all models
-// in the group. User picks any model from the dropdown.
-const PROVIDER_MODELS: Record<
-  string,
-  { label: string; apiId: string; pricing?: string; mode?: ProviderModelMode }[]
-> = {
-  anthropic: [
-    { label: "Claude Fable 5 Adaptive Low", apiId: "claude-fable-5", mode: "anthropic-adaptive-low", pricing: "$10/$50 per 1M tok" },
-    { label: "Claude Fable 5 Adaptive Medium", apiId: "claude-fable-5", mode: "anthropic-adaptive-medium", pricing: "$10/$50 per 1M tok" },
-    { label: "Claude Fable 5 Adaptive High", apiId: "claude-fable-5", mode: "anthropic-adaptive-high", pricing: "$10/$50 per 1M tok" },
-    { label: "Claude Fable 5 Adaptive XHigh", apiId: "claude-fable-5", mode: "anthropic-adaptive-xhigh", pricing: "$10/$50 per 1M tok" },
-    { label: "Claude Opus 4.8 Instant", apiId: "claude-opus-4-8", mode: "instant", pricing: "$5/$25 per 1M tok" },
-    { label: "Claude Opus 4.8 Adaptive Low", apiId: "claude-opus-4-8", mode: "anthropic-adaptive-low", pricing: "$5/$25 per 1M tok" },
-    { label: "Claude Opus 4.8 Adaptive Medium", apiId: "claude-opus-4-8", mode: "anthropic-adaptive-medium", pricing: "$5/$25 per 1M tok" },
-    { label: "Claude Opus 4.8 Adaptive High", apiId: "claude-opus-4-8", mode: "anthropic-adaptive-high", pricing: "$5/$25 per 1M tok" },
-    { label: "Claude Opus 4.8 Adaptive XHigh", apiId: "claude-opus-4-8", mode: "anthropic-adaptive-xhigh", pricing: "$5/$25 per 1M tok" },
-    { label: "Claude Opus 4.7", apiId: "claude-opus-4-7", pricing: "$5/$25 per 1M tok" },
-    { label: "Claude Opus 4.6", apiId: "claude-opus-4-6", pricing: "$5/$25 per 1M tok" },
-    { label: "Claude Sonnet 4.6", apiId: "claude-sonnet-4-6", pricing: "$3/$15 per 1M tok" },
-    { label: "Claude Haiku 4.5", apiId: "claude-haiku-4-5-20251001", pricing: "$0.80/$4 per 1M tok" },
-  ],
-  openai: [
-    { label: "GPT-5.5 Instant", apiId: "gpt-5.5", mode: "instant", pricing: "$5/$30 per 1M tok" },
-    { label: "GPT-5.5 Thinking", apiId: "gpt-5.5", mode: "openai-thinking", pricing: "$5/$30 per 1M tok" },
-    { label: "GPT-5.5 Deep", apiId: "gpt-5.5", mode: "openai-deep", pricing: "$5/$30 per 1M tok" },
-    { label: "GPT-5.5 Pro", apiId: "gpt-5.5-pro", mode: "openai-pro", pricing: "$30/$180 per 1M tok" },
-    { label: "GPT-5.4", apiId: "gpt-5.4", pricing: "$2.50/$15 per 1M tok" },
-    { label: "GPT-5.4 Pro", apiId: "gpt-5.4-pro", mode: "openai-pro", pricing: "$30/$180 per 1M tok" },
-    { label: "GPT-5.4 Mini", apiId: "gpt-5.4-mini", pricing: "$0.75/$4.50 per 1M tok" },
-    { label: "GPT-5.4 Nano", apiId: "gpt-5.4-nano", pricing: "$0.20/$1.25 per 1M tok" },
-    { label: "GPT-5", apiId: "gpt-5", pricing: "$2.50/$15 per 1M tok" },
-    { label: "GPT-5 Mini", apiId: "gpt-5-mini", pricing: "$0.75/$4.50 per 1M tok" },
-    { label: "GPT-4.1", apiId: "gpt-4.1", pricing: "$2/$8 per 1M tok" },
-  ],
-};
-
 function WorkspaceModeTabs({
   value,
   onChange,
@@ -3637,7 +3635,9 @@ function ModelPicker({
           ))}
         </optgroup>
         {Array.from(providersByType.entries()).map(([type, provider]) => {
-          const knownModels = PROVIDER_MODELS[type];
+          const knownModels = type === "anthropic" || type === "openai"
+            ? PROVIDER_MODEL_OPTIONS[type]
+            : undefined;
           const label = type === "anthropic" ? "Anthropic (Claude)"
             : type === "openai" ? "OpenAI (GPT)"
             : type === "openai-compatible" ? provider.label

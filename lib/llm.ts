@@ -1,7 +1,8 @@
 // LLM chat completion router (server-only). Supports:
 //   - Ollama (local, no auth) - default
 //   - Anthropic (Claude) via /v1/messages
-//   - OpenAI / OpenAI-compatible via /v1/chat/completions
+//   - OpenAI via /v1/responses
+//   - OpenAI-compatible via /v1/chat/completions
 //
 // IMPORTANT: This file is server-only because it imports from `lib/providers`
 // which uses `pg`. Client-safe constants (MODEL_OPTIONS, ModelId, ModelMode)
@@ -43,7 +44,7 @@ export const FAST_MODEL =
 
 /**
  * Find the cheapest available LLM for background tasks (fact extraction, title gen).
- * Priority: Haiku > GPT-4.1 Nano > Grok Mini > local Gemma.
+ * Priority: Haiku > GPT-5.6 Luna > Grok Mini > local Gemma.
  * Returns { model, providerId } for use with llmChat().
  */
 import { listProviders } from "@/lib/providers";
@@ -65,10 +66,10 @@ export async function getCheapestLLM(): Promise<{ model: string; providerId?: st
     return _cheapestCache;
   }
 
-  // 2. GPT-4.1 Nano via OpenAI ($0.10/$0.40)
+  // 2. GPT-5.6 Luna via OpenAI ($0.20/$1.20)
   const openai = providers.find((p) => p.type === "openai" && p.api_key);
   if (openai) {
-    _cheapestCache = { model: "gpt-4.1-nano", providerId: openai.id };
+    _cheapestCache = { model: "gpt-5.6-luna", providerId: openai.id };
     _cheapestCacheTime = Date.now();
     return _cheapestCache;
   }
@@ -125,7 +126,7 @@ const SUPPORTED_IMAGE_MEDIA_TYPES: ImageMediaType[] = [
   "image/webp",
 ];
 
-type AnthropicAdaptiveEffort = "low" | "medium" | "high" | "xhigh";
+type AnthropicAdaptiveEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 function splitImageData(image: string): { base64: string; declaredMediaType: string | null } {
   const trimmed = image.trim();
@@ -247,16 +248,16 @@ export async function* chatStream(
 ): AsyncGenerator<ChatStreamChunk> {
   const provider = await resolveProvider(options);
   await assertProviderUrlSafe(provider);
-  // Native web search only works for Anthropic (web_search_20250305).
-  // OpenAI's chat completions doesn't support web_search_preview
-  // (that's Responses API only). Ollama, OpenAI, and OpenAI-compatible
-  // all use Brave search via the chat route instead.
+  // Anthropic uses its native web-search tool. The chat route injects Brave
+  // results for Ollama, OpenAI Responses, and OpenAI-compatible providers.
   const webSearch = !!options.webSearch && provider.type === "anthropic";
   const thinking = !!options.thinking;
   if (provider.type === "anthropic") {
     yield* anthropicStream(provider, messages, webSearch, options.providerModelMode);
   } else if (provider.type === "ollama") {
     yield* ollamaStream(provider, messages, thinking);
+  } else if (provider.type === "openai") {
+    yield* openaiResponsesStream(provider, messages, options.providerModelMode);
   } else {
     yield* openaiStream(provider, messages, options.providerModelMode);
   }
@@ -307,6 +308,8 @@ export async function testProvider(input: {
       reply = await anthropicNonStream(provider, messages);
     } else if (provider.type === "ollama") {
       reply = await ollamaNonStream(provider, messages);
+    } else if (provider.type === "openai") {
+      reply = await openaiResponsesNonStream(provider, messages);
     } else {
       reply = await openaiNonStream(provider, messages);
     }
@@ -329,6 +332,8 @@ export async function chat(
     result = await anthropicNonStream(provider, messages, options.providerModelMode);
   } else if (provider.type === "ollama") {
     result = await ollamaNonStream(provider, messages);
+  } else if (provider.type === "openai") {
+    result = await openaiResponsesNonStream(provider, messages, options.providerModelMode);
   } else {
     result = await openaiNonStream(provider, messages, options.providerModelMode);
   }
@@ -447,8 +452,7 @@ async function ollamaNonStream(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OpenAI / OpenAI-compatible transport
-// Format: POST {baseUrl}/v1/chat/completions, Bearer auth, OpenAI message format
+// OpenAI Responses transport
 // ─────────────────────────────────────────────────────────────────────────────
 
 function openaiHeaders(provider: ResolvedProvider): Record<string, string> {
@@ -456,6 +460,135 @@ function openaiHeaders(provider: ResolvedProvider): Record<string, string> {
   if (provider.apiKey) headers["Authorization"] = `Bearer ${provider.apiKey}`;
   return headers;
 }
+
+export function openaiResponsesRequestBody(
+  model: string,
+  messages: ChatMessage[],
+  stream: boolean,
+  providerModelMode?: ProviderModelMode
+): string {
+  const reasoningEffort = openaiReasoningEffortForMode("openai", model, providerModelMode);
+  return JSON.stringify({
+    model,
+    input: messages.map((message) => {
+      if (message.images && message.images.length > 0) {
+        const content: Array<Record<string, unknown>> = message.images.map((image) => ({
+          type: "input_image",
+          image_url: imageDataUrl(image),
+        }));
+        if (message.content) content.push({ type: "input_text", text: message.content });
+        return { role: message.role, content };
+      }
+      return { role: message.role, content: message.content };
+    }),
+    stream,
+    store: false,
+    ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
+  });
+}
+
+async function* openaiResponsesStream(
+  provider: ResolvedProvider,
+  messages: ChatMessage[],
+  providerModelMode?: ProviderModelMode
+): AsyncGenerator<ChatStreamChunk> {
+  const url = `${provider.baseUrl.replace(/\/$/, "")}/v1/responses`;
+  const res = await fetch(url, {
+    method: "POST",
+    redirect: "error",
+    headers: openaiHeaders(provider),
+    body: openaiResponsesRequestBody(provider.model, messages, true, providerModelMode),
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(`OpenAI request failed: ${res.status} ${await res.text()}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let completed = false;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const data = trimmed.slice(5).trim();
+      if (!data || data === "[DONE]") continue;
+      let event: {
+        type?: string;
+        delta?: string;
+        response?: {
+          model?: string;
+          usage?: { input_tokens?: number; output_tokens?: number };
+          error?: { message?: string } | null;
+        };
+      };
+      try {
+        event = JSON.parse(data) as typeof event;
+      } catch {
+        continue;
+      }
+      if (event.type === "response.output_text.delta" && event.delta) {
+        yield { delta: event.delta, done: false };
+      } else if (event.type === "response.completed" && event.response) {
+        completed = true;
+        yield {
+          delta: "",
+          done: true,
+          usage: {
+            inputTokens: event.response.usage?.input_tokens || 0,
+            outputTokens: event.response.usage?.output_tokens || 0,
+          },
+          model: event.response.model || provider.model,
+        };
+      } else if (event.type === "response.failed") {
+        throw new Error(event.response?.error?.message || "OpenAI response failed");
+      }
+    }
+  }
+
+  if (!completed) {
+    yield { delta: "", done: true, usage: { inputTokens: 0, outputTokens: 0 }, model: provider.model };
+  }
+}
+
+export function openaiResponsesOutputText(data: {
+  output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+}): string {
+  return (data.output || [])
+    .flatMap((item) => item.content || [])
+    .filter((item) => item.type === "output_text")
+    .map((item) => item.text || "")
+    .join("");
+}
+
+async function openaiResponsesNonStream(
+  provider: ResolvedProvider,
+  messages: ChatMessage[],
+  providerModelMode?: ProviderModelMode
+): Promise<string> {
+  const url = `${provider.baseUrl.replace(/\/$/, "")}/v1/responses`;
+  const res = await fetch(url, {
+    method: "POST",
+    redirect: "error",
+    headers: openaiHeaders(provider),
+    body: openaiResponsesRequestBody(provider.model, messages, false, providerModelMode),
+  });
+  if (!res.ok) throw new Error(`OpenAI failed: ${res.status} ${await res.text()}`);
+  const data = (await res.json()) as {
+    output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+  };
+  return openaiResponsesOutputText(data);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OpenAI-compatible Chat Completions transport
+// Format: POST {baseUrl}/v1/chat/completions, Bearer auth
+// ─────────────────────────────────────────────────────────────────────────────
 
 function openaiBody(
   provider: ResolvedProvider,
@@ -492,14 +625,14 @@ export function openaiReasoningEffortForMode(
   providerType: ProviderType,
   model: string,
   providerModelMode?: ProviderModelMode
-): "none" | "medium" | "xhigh" | null {
+): "none" | "medium" | "xhigh" | "max" | null {
   if (providerType !== "openai") return null;
   if (providerModelMode === "openai-thinking") return "medium";
   if (
     providerModelMode === "openai-deep" ||
-    providerModelMode === "openai-pro" ||
-    model.endsWith("-pro")
+    providerModelMode === "openai-pro"
   ) return "xhigh";
+  if (providerModelMode === "openai-max" || model.endsWith("-pro")) return "max";
   if (providerModelMode === "instant" && model.startsWith("gpt-5")) return "none";
   return null;
 }
@@ -507,7 +640,7 @@ export function openaiReasoningEffortForMode(
 function openaiReasoningEffort(
   provider: ResolvedProvider,
   providerModelMode?: ProviderModelMode
-): "none" | "medium" | "xhigh" | null {
+): "none" | "medium" | "xhigh" | "max" | null {
   return openaiReasoningEffortForMode(provider.type, provider.model, providerModelMode);
 }
 
@@ -677,6 +810,8 @@ export function anthropicAdaptiveEffortForMode(
       return "high";
     case "anthropic-adaptive-xhigh":
       return "xhigh";
+    case "anthropic-adaptive-max":
+      return "max";
     default:
       return null;
   }

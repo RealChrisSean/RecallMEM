@@ -14,16 +14,16 @@ This is v0.2. It works, gets used daily, and now includes memory-backed voice. I
 
 ## What's partially done
 
-**Web search works on Anthropic and Ollama. OpenAI not yet.**
+**Web search uses two provider paths.**
 - Anthropic uses the native `web_search_20250305` tool, no setup.
-- Ollama (Gemma) uses **Brave Search** as a backend, which needs an API key (~5 minute setup): sign up at [brave.com/search/api](https://brave.com/search/api), pick the Search plan ($5/1,000 requests, includes $5 free credits every month so ~1,000 searches/month are free), and paste the key into Settings → Web search.
-- OpenAI's native web search requires the Responses API path which isn't plumbed through yet.
+- Ollama, OpenAI, and OpenAI-compatible providers use **Brave Search** as a backend, which needs an API key (~5 minute setup): sign up at [brave.com/search/api](https://brave.com/search/api), pick the Search plan ($5/1,000 requests, includes $5 free credits every month so ~1,000 searches/month are free), and paste the key into Settings → Web search.
+- Direct OpenAI calls use the Responses API, but RecallMEM does not enable OpenAI's native web-search tool; it keeps one consistent Brave result-injection path for non-Anthropic providers.
 
-**Voice Agent provider support depends on Deepgram.** The live agent can use compatible cloud providers through Deepgram's `think` provider path. If a selected chat model is local, too slow, or unsupported by Deepgram, RecallMEM falls back to a fast compatible voice model instead of trying to run that exact chat configuration live.
+**Voice Agent provider support depends on Deepgram.** The live agent can use compatible cloud providers through Deepgram's `think` provider path. RecallMEM checks Deepgram's current model list and disables voice when the selected chat model or mode is unsupported. Once a compatible session starts, it includes fast Deepgram-supported fallback providers for transient failures.
 
-**Reasoning/pro modes are text-chat first.** GPT instant/thinking/deep/pro and Claude Opus 4.8 instant/adaptive are selectable in chat. Voice Agent intentionally keeps itself on fast compatible models, so it will not run a minutes-long GPT Pro or deep/adaptive thinking loop during live speech.
+**Reasoning modes are text-chat first.** GPT-5.6 instant/thinking/deep/max and Claude adaptive effort modes are selectable in chat. Voice Agent intentionally accepts only instant selections, so it will not run deep, max, or adaptive thinking loops during live speech.
 
-**OpenAI vision isn't fully wired up.** Gemma 4 (4B and up) handles images natively via Ollama. OpenAI uses a different format that hasn't been plumbed through. Use Ollama or Anthropic for images.
+**Vision support is provider-dependent.** Gemma 4, current OpenAI models through Responses, and current Claude models accept image input. OpenAI-compatible providers still depend on the capabilities and request format of the configured endpoint.
 
 **Auto-install is Mac-only.** The `npx recallmem` installer auto-installs Postgres, pgvector, Ollama, and pulls models on Mac via Homebrew. On Linux, it prints clear manual steps and exits.
 
@@ -44,4 +44,4 @@ This is v0.2. It works, gets used daily, and now includes memory-backed voice. I
 - **Voice Agent:** Deepgram Voice Agent with Flux listening and Aura-2 speech
 - **PDF parsing:** pdf-parse v2
 - **Markdown rendering:** react-markdown + remark-gfm + @tailwindcss/typography
-- **Cloud LLM transports (optional):** Anthropic Messages API, OpenAI Chat Completions, OpenAI-compatible
+- **Cloud LLM transports (optional):** Anthropic Messages API, OpenAI Responses API, OpenAI-compatible Chat Completions

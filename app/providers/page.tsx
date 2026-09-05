@@ -4,6 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { AppFooter } from "@/components/AppFooter";
 import { Logo } from "@/components/Logo";
+import {
+  CURRENT_PROVIDER_MODELS,
+  type KnownProviderModel,
+} from "@/lib/llm-config";
 
 type ProviderType = "ollama" | "anthropic" | "openai" | "openai-compatible";
 
@@ -33,41 +37,17 @@ const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
 
 const PRESET_HINTS: Record<ProviderType, string> = {
   ollama: "e.g. gemma4:26b, llama3:70b",
-  anthropic: "e.g. claude-fable-5, claude-opus-4-8",
-  openai: "e.g. gpt-5.5, gpt-5.4-mini",
+  anthropic: "e.g. claude-fable-5-1, claude-sonnet-5",
+  openai: "e.g. gpt-5.6-sol, gpt-5.6-luna",
   "openai-compatible":
-    "e.g. llama-3.3-70b-versatile, mixtral-8x22b, anthropic/claude-opus-4.8",
+    "e.g. llama-3.3-70b-versatile, mixtral-8x22b, openai/gpt-oss-20b",
 };
 
 // Curated list of known models per provider type. The user picks the friendly
 // name from the dropdown and the API model ID gets filled in automatically.
 // Update this when new models are released.
-interface KnownModel {
-  label: string;
-  apiId: string;
-}
-
-const KNOWN_MODELS: Partial<Record<ProviderType, KnownModel[]>> = {
-  anthropic: [
-    { label: "Claude Fable 5", apiId: "claude-fable-5" },
-    { label: "Claude Opus 4.8", apiId: "claude-opus-4-8" },
-    { label: "Claude Opus 4.7", apiId: "claude-opus-4-7" },
-    { label: "Claude Opus 4.6", apiId: "claude-opus-4-6" },
-    { label: "Claude Sonnet 4.6", apiId: "claude-sonnet-4-6" },
-    { label: "Claude Haiku 4.5", apiId: "claude-haiku-4-5-20251001" },
-  ],
-  openai: [
-    { label: "GPT-5.5", apiId: "gpt-5.5" },
-    { label: "GPT-5.4", apiId: "gpt-5.4" },
-    { label: "GPT-5.4 Pro", apiId: "gpt-5.4-pro" },
-    { label: "GPT-5.4 Mini", apiId: "gpt-5.4-mini" },
-    { label: "GPT-5.4 Nano", apiId: "gpt-5.4-nano" },
-    { label: "GPT-5 Mini", apiId: "gpt-5-mini" },
-    { label: "GPT-5 Nano", apiId: "gpt-5-nano" },
-    { label: "GPT-5", apiId: "gpt-5" },
-    { label: "GPT-4.1", apiId: "gpt-4.1" },
-  ],
-};
+const KNOWN_MODELS: Partial<Record<ProviderType, KnownProviderModel[]>> =
+  CURRENT_PROVIDER_MODELS;
 
 const KEY_HELP: Record<ProviderType, { url: string; text: string } | null> = {
   ollama: null,
@@ -444,14 +424,16 @@ export default function ProvidersPage() {
                     <option value="">— Pick a model —</option>
                     {KNOWN_MODELS[type]?.map((m) => (
                       <option key={m.apiId} value={m.apiId}>
-                        {m.label}
+                        {m.label} — {m.pricing}
                       </option>
                     ))}
                   </select>
                   {model && (
                     <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-1">
-                      API model ID:{" "}
-                      <code className="font-mono">{model}</code>
+                      API model ID: <code className="font-mono">{model}</code>
+                      {KNOWN_MODELS[type]?.find((item) => item.apiId === model)?.pricing
+                        ? ` · ${KNOWN_MODELS[type]?.find((item) => item.apiId === model)?.pricing}`
+                        : ""}
                     </p>
                   )}
                 </>

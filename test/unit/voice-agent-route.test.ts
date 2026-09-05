@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getActiveFacts: vi.fn(),
   getRules: vi.fn(),
   getProvider: vi.fn(),
+  getDeepgramVoiceThinkModels: vi.fn(),
 }));
 
 vi.mock("@/lib/settings", () => ({
@@ -31,6 +32,10 @@ vi.mock("@/lib/providers", () => ({
   getProvider: mocks.getProvider,
 }));
 
+vi.mock("@/lib/deepgram-voice-models", () => ({
+  getDeepgramVoiceThinkModels: mocks.getDeepgramVoiceThinkModels,
+}));
+
 import { POST } from "@/app/api/voice-agent/route";
 
 function request(body: unknown): NextRequest {
@@ -49,6 +54,18 @@ describe("voice-agent route", () => {
     mocks.getActiveFacts.mockReset();
     mocks.getRules.mockReset();
     mocks.getProvider.mockReset();
+    mocks.getDeepgramVoiceThinkModels.mockReset();
+    mocks.getDeepgramVoiceThinkModels.mockResolvedValue({
+      source: "bundled",
+      models: [
+        { provider: "open_ai", model: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+        { provider: "open_ai", model: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+        { provider: "open_ai", model: "gpt-5.5", label: "GPT-5.5" },
+        { provider: "anthropic", model: "claude-sonnet-5", label: "Claude Sonnet 5" },
+        { provider: "anthropic", model: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
+        { provider: "google", model: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+      ],
+    });
 
     mocks.getSetting.mockImplementation(async (key: string) =>
       key === "deepgram_api_key" ? "deepgram-key" : null
@@ -109,7 +126,7 @@ describe("voice-agent route", () => {
     });
     expect(body.settings.agent.think[1].provider).toEqual({
       type: "open_ai",
-      model: "gpt-5.4-mini",
+      model: "gpt-5.6-luna",
     });
     expect(body.settings.agent.think[2].provider).toEqual({
       type: "anthropic",
@@ -121,7 +138,7 @@ describe("voice-agent route", () => {
       body.settings.agent.think[0].functions
     );
     expect(body.thinkFallbackModels).toEqual([
-      "open_ai:gpt-5.4-mini",
+      "open_ai:gpt-5.6-luna",
       "anthropic:claude-haiku-4-5",
     ]);
   });
@@ -235,7 +252,7 @@ describe("voice-agent route", () => {
 
     expect(res.status).toBe(400);
     expect(body.error).toContain("only supports realtime/instant");
-    expect(body.error).toContain("GPT-5.5");
+    expect(body.error).toContain("GPT-5.6 Terra");
   });
 
   it("maps Anthropic's dated Haiku ID to Deepgram's supported Haiku ID", async () => {
@@ -268,7 +285,7 @@ describe("voice-agent route", () => {
     });
     expect(body.settings.agent.think[1].provider).toEqual({
       type: "open_ai",
-      model: "gpt-5.4-mini",
+      model: "gpt-5.6-luna",
     });
   });
 
@@ -295,7 +312,7 @@ describe("voice-agent route", () => {
 
     expect(res.status).toBe(400);
     expect(body.error).toContain("incompatible");
-    expect(body.error).toContain("Claude Sonnet 4.6");
+    expect(body.error).toContain("Claude Sonnet 5");
     expect(body.error).toContain("Claude Haiku 4.5");
   });
 
@@ -564,7 +581,7 @@ describe("voice-agent route", () => {
     });
     expect(body.settings.agent.think[1].provider).toEqual({
       type: "open_ai",
-      model: "gpt-5.4-mini",
+      model: "gpt-5.6-luna",
     });
   });
 

@@ -11,6 +11,7 @@ import {
   VOICE_OUTPUT_SAMPLE_RATE,
 } from "@/lib/voice-audio";
 import { getDeepgramVoiceAgentCompatibility } from "@/lib/voice-agent-models";
+import { getDeepgramVoiceThinkModels } from "@/lib/deepgram-voice-models";
 
 export const runtime = "nodejs";
 
@@ -33,7 +34,7 @@ const VOICE_AGENT_FALLBACK_VOICE = "aura-2-thalia-en";
 const DEFAULT_VOICE_AGENT_SPEED = 1.0;
 const FALLBACK_OPENAI_THINK_PROVIDER = {
   type: "open_ai",
-  model: "gpt-5.4-mini",
+  model: "gpt-5.6-luna",
 } as const;
 const FALLBACK_ANTHROPIC_THINK_PROVIDER = {
   type: "anthropic",
@@ -59,7 +60,7 @@ const DEFAULT_PRONUNCIATION_GUIDANCE = [
   "Say RecallMEM as \"recall mem\".",
   "Say pgvector as \"pee gee vector\".",
   "Say Fly.io as \"fly eye oh\".",
-  "Say GPT-5.5 as \"GPT five point five\" and similar model names naturally.",
+  "Say GPT-5.6 as \"GPT five point six\" and similar model names naturally.",
   "For exact model IDs, project names, API names, and user names, preserve the wording but speak it naturally instead of reading punctuation awkwardly.",
 ].join(" ");
 
@@ -580,6 +581,7 @@ async function resolveVoiceThinkProvider(
   }
 
   const model = (body.model || provider.model || "").trim();
+  const voiceModels = await getDeepgramVoiceThinkModels();
   const compatibility = getDeepgramVoiceAgentCompatibility({
     providerId: provider.id,
     providerType: provider.type,
@@ -588,7 +590,7 @@ async function resolveVoiceThinkProvider(
     providerModel: provider.model,
     selectedModel: model,
     selectedModelMode: body.modelMode,
-  });
+  }, voiceModels.models);
 
   if (!compatibility.compatible) {
     throw new VoiceAgentConfigError(

@@ -7,6 +7,12 @@ export type DeepgramVoiceThinkProviderType =
   | "groq"
   | "nvidia";
 
+export interface DeepgramVoiceThinkModel {
+  provider: DeepgramVoiceThinkProviderType;
+  model: string;
+  label: string;
+}
+
 export interface VoiceAgentProviderSelection {
   providerId?: string | null;
   providerType?: string | null;
@@ -31,7 +37,9 @@ export type DeepgramVoiceCompatibility =
       supportedModels: string[];
     };
 
-const SUPPORTED_DEEPGRAM_VOICE_THINK_MODELS = [
+export const BUNDLED_DEEPGRAM_VOICE_THINK_MODELS = [
+  { provider: "open_ai", model: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+  { provider: "open_ai", model: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
   { provider: "open_ai", model: "gpt-5.2", label: "GPT 5.2" },
   { provider: "open_ai", model: "gpt-5.4", label: "GPT 5.4" },
   { provider: "open_ai", model: "gpt-4.1", label: "GPT-4.1" },
@@ -50,23 +58,18 @@ const SUPPORTED_DEEPGRAM_VOICE_THINK_MODELS = [
   { provider: "open_ai", model: "gpt-5.4-nano", label: "GPT-5.4 Nano" },
   { provider: "open_ai", model: "gpt-5.5", label: "GPT-5.5" },
   { provider: "anthropic", model: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
-  { provider: "anthropic", model: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
+  { provider: "anthropic", model: "claude-sonnet-5", label: "Claude Sonnet 5" },
   { provider: "anthropic", model: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
   { provider: "anthropic", model: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { provider: "google", model: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-  { provider: "google", model: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
+  { provider: "google", model: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite" },
   { provider: "google", model: "gemini-3-flash-preview", label: "Gemini 3.0 Flash Preview" },
   { provider: "google", model: "gemini-3-pro-preview", label: "Gemini 3.0 Pro Preview" },
   { provider: "google", model: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
-  { provider: "google", model: "gemini-3.1-flash-lite-preview", label: "Gemini 3.1 Flash Lite Preview" },
   { provider: "google", model: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
   { provider: "groq", model: "openai/gpt-oss-20b", label: "GPT OSS 20B" },
-  { provider: "nvidia", model: "nvidia/nemotron-3-nano-30b-a3b", label: "Nemotron 3 Nano 30B A3B" },
-] as const satisfies readonly {
-  provider: DeepgramVoiceThinkProviderType;
-  model: string;
-  label: string;
-}[];
+  { provider: "nvidia", model: "nemotron-3-nano-30B-A3B", label: "Nemotron 3 Nano 30B A3B" },
+] as const satisfies readonly DeepgramVoiceThinkModel[];
 
 const PROVIDER_LABELS: Record<DeepgramVoiceThinkProviderType, string> = {
   open_ai: "OpenAI",
@@ -77,25 +80,35 @@ const PROVIDER_LABELS: Record<DeepgramVoiceThinkProviderType, string> = {
 };
 
 const DEFAULT_VOICE_RECOMMENDATIONS = [
-  "GPT-5.5",
-  "GPT-5.4 Mini",
-  "Claude Sonnet 4.6",
+  "GPT-5.6 Terra",
+  "GPT-5.6 Luna",
+  "Claude Sonnet 5",
   "Claude Haiku 4.5",
-  "Gemini 2.5 Flash",
+  "Gemini 3.5 Flash",
 ];
 
-function modelRowsForProvider(provider: DeepgramVoiceThinkProviderType) {
-  return SUPPORTED_DEEPGRAM_VOICE_THINK_MODELS.filter(
+function modelRowsForProvider(
+  provider: DeepgramVoiceThinkProviderType,
+  models: readonly DeepgramVoiceThinkModel[]
+) {
+  return models.filter(
     (row) => row.provider === provider
   );
 }
 
-function supportedLabelsForProvider(provider: DeepgramVoiceThinkProviderType) {
-  return modelRowsForProvider(provider).map((row) => row.label);
+function supportedLabelsForProvider(
+  provider: DeepgramVoiceThinkProviderType,
+  models: readonly DeepgramVoiceThinkModel[]
+) {
+  return modelRowsForProvider(provider, models).map((row) => row.label);
 }
 
-function isSupported(provider: DeepgramVoiceThinkProviderType, model: string) {
-  return modelRowsForProvider(provider).some((row) => row.model === model);
+function isSupported(
+  provider: DeepgramVoiceThinkProviderType,
+  model: string,
+  models: readonly DeepgramVoiceThinkModel[]
+) {
+  return modelRowsForProvider(provider, models).some((row) => row.model === model);
 }
 
 function normalizeHostedModelName(model: string) {
@@ -117,8 +130,8 @@ function normalizeProviderModel(
     return "openai/gpt-oss-20b";
   }
 
-  if (provider === "nvidia" && lastSegment === "nemotron-3-nano-30b-a3b") {
-    return "nvidia/nemotron-3-nano-30b-a3b";
+  if (provider === "nvidia" && lastSegment.toLowerCase() === "nemotron-3-nano-30b-a3b") {
+    return "nemotron-3-nano-30B-A3B";
   }
 
   if (provider === "google" || provider === "anthropic" || provider === "open_ai") {
@@ -184,7 +197,8 @@ export function formatVoiceAgentSupportedModels(models: string[]) {
 }
 
 export function getDeepgramVoiceAgentCompatibility(
-  selection: VoiceAgentProviderSelection
+  selection: VoiceAgentProviderSelection,
+  models: readonly DeepgramVoiceThinkModel[] = BUNDLED_DEEPGRAM_VOICE_THINK_MODELS
 ): DeepgramVoiceCompatibility {
   const model = (selection.selectedModel || selection.providerModel || "").trim();
   const providerType = (selection.providerType || "").toLowerCase();
@@ -219,7 +233,7 @@ export function getDeepgramVoiceAgentCompatibility(
     return {
       compatible: false,
       reason:
-        "Deepgram Voice Agent only supports realtime/instant model selections. Reasoning, pro, deep, and adaptive modes are for text chat.",
+        "Deepgram Voice Agent only supports realtime/instant model selections. Reasoning, max, pro, deep, and adaptive modes are for text chat.",
       supportedModels: DEFAULT_VOICE_RECOMMENDATIONS,
     };
   }
@@ -240,9 +254,9 @@ export function getDeepgramVoiceAgentCompatibility(
   }
 
   const normalizedModel = normalizeProviderModel(model, provider);
-  const supportedModels = supportedLabelsForProvider(provider);
+  const supportedModels = supportedLabelsForProvider(provider, models);
 
-  if (!isSupported(provider, normalizedModel)) {
+  if (!isSupported(provider, normalizedModel, models)) {
     return {
       compatible: false,
       reason: unsupportedMessage(model, provider, supportedModels),

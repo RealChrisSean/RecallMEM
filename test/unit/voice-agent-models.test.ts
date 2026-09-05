@@ -1,21 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { getDeepgramVoiceAgentCompatibility } from "@/lib/voice-agent-models";
+import {
+  BUNDLED_DEEPGRAM_VOICE_THINK_MODELS,
+  getDeepgramVoiceAgentCompatibility,
+} from "@/lib/voice-agent-models";
 
 describe("voice agent model compatibility", () => {
-  it("accepts supported GPT models", () => {
+  it("keeps the bundled fallback aligned with current Deepgram labels", () => {
+    const ids = BUNDLED_DEEPGRAM_VOICE_THINK_MODELS.map((row) => row.model);
+    expect(ids).toContain("gpt-5.6-terra");
+    expect(ids).toContain("gpt-5.6-luna");
+    expect(ids).toContain("claude-sonnet-5");
+    expect(ids).toContain("gemini-2.0-flash-lite");
+    expect(ids).not.toContain("claude-sonnet-4-20250514");
+    expect(ids).not.toContain("gemini-3.1-flash-lite-preview");
+  });
+  it("accepts current supported GPT models", () => {
     const result = getDeepgramVoiceAgentCompatibility({
       providerId: "openai",
       providerType: "openai",
       providerLabel: "OpenAI",
-      providerModel: "gpt-5.5",
-      selectedModel: "gpt-5.5",
+      providerModel: "gpt-5.6-terra",
+      selectedModel: "gpt-5.6-terra",
       selectedModelMode: "instant",
     });
 
     expect(result.compatible).toBe(true);
     if (result.compatible) {
       expect(result.provider).toBe("open_ai");
-      expect(result.model).toBe("gpt-5.5");
+      expect(result.model).toBe("gpt-5.6-terra");
     }
   });
 

@@ -1,8 +1,10 @@
 import { query, getBaseUserId } from "@/lib/db";
+import { CURRENT_MODEL_PRICING_CENTS } from "@/lib/llm-config";
 
 // Model-specific pricing per 1M tokens (in cents).
 // Falls back to provider-level defaults if model not found.
 const MODEL_PRICING: Record<string, { in: number; out: number }> = {
+  ...CURRENT_MODEL_PRICING_CENTS,
   // Anthropic
   "claude-fable-5":              { in: 1000, out: 5000 },  // $10/$50
   "claude-opus-4-8":             { in: 500,  out: 2500 },  // $5/$25
@@ -11,7 +13,7 @@ const MODEL_PRICING: Record<string, { in: number; out: number }> = {
   "claude-opus-4-5":             { in: 500,  out: 2500 },
   "claude-sonnet-4-6":           { in: 300,  out: 1500 },  // $3/$15
   "claude-sonnet-4-5":           { in: 300,  out: 1500 },
-  "claude-haiku-4-5-20251001":   { in: 80,   out: 400 },   // $0.80/$4
+  "claude-haiku-4-5-20251001":   { in: 100,  out: 500 },   // $1/$5
   // OpenAI
   "gpt-5.5":                     { in: 500,  out: 3000 },  // $5/$30
   "gpt-5.4":                     { in: 250,  out: 1500 },  // $2.50/$15
@@ -33,8 +35,8 @@ const MODEL_PRICING: Record<string, { in: number; out: number }> = {
 
 // Provider-level defaults (fallback if model not in the table above)
 const PROVIDER_DEFAULTS: Record<string, { in: number; out: number }> = {
-  anthropic: { in: 300, out: 1500 },   // Sonnet pricing as default
-  openai:    { in: 250, out: 1500 },
+  anthropic: { in: 200, out: 1000 },   // Sonnet 5 pricing as default
+  openai:    { in: 200, out: 1200 },   // GPT-5.6 Terra pricing as default
   xai:       { in: 300, out: 1500 },
   ollama:    { in: 0,   out: 0 },
 };

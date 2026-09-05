@@ -134,10 +134,9 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Web search for local providers (Ollama). Anthropic gets web search via
-    // its own native tool downstream; OpenAI is not wired yet. For Ollama
-    // and "no provider" (built-in local), we do the search ourselves and
-    // prepend results to the system prompt as live context. This is the
+    // Anthropic gets web search via its native tool downstream. For Ollama,
+    // OpenAI, OpenAI-compatible, and "no provider" (built-in local), search
+    // is performed here and the results are prepended as live context. This is the
     // ONLY place in the local path where the user's query leaves the
     // machine - explicitly opt-in via the UI toggle, with a one-time
     // privacy warning the first time the user enables it.

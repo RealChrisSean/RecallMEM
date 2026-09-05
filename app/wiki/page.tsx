@@ -17,6 +17,8 @@ import {
   DEFAULT_PROVIDER_MODEL_MODE,
   isProviderModelMode,
   MODEL_OPTIONS,
+  migrateProviderModelSelection,
+  WIKI_PROVIDER_MODEL_OPTIONS,
   type ModelId,
   type ProviderModelMode,
 } from "@/lib/llm-config";
@@ -34,18 +36,6 @@ interface ProviderListItem {
   api_key_preview: string | null;
   created_at: string;
 }
-
-const WIKI_PROVIDER_MODELS: Partial<
-  Record<ProviderType, { label: string; apiId: string; mode?: ProviderModelMode }[]>
-> = {
-  anthropic: [
-    { label: "Claude Sonnet 4.6", apiId: "claude-sonnet-4-6" },
-    { label: "Claude Haiku 4.5", apiId: "claude-haiku-4-5-20251001" },
-  ],
-  openai: [
-    { label: "GPT-4o Mini", apiId: "gpt-4o-mini" },
-  ],
-};
 
 interface WikiSource {
   id: string;
@@ -203,12 +193,26 @@ export default function WikiPage() {
 
   useEffect(() => {
     if (!providersLoaded || !selectedProviderId) return;
-    if (!providers.some((provider) => provider.id === selectedProviderId)) {
+    const provider = providers.find((item) => item.id === selectedProviderId);
+    if (!provider) {
       setSelectedProviderId(null);
       setSelectedProviderModel(null);
       setSelectedProviderModelMode(DEFAULT_PROVIDER_MODEL_MODE);
+      return;
     }
-  }, [providers, providersLoaded, selectedProviderId]);
+    const sourceModel = selectedProviderModel || provider.model;
+    if (sourceModel) {
+      const migrated = migrateProviderModelSelection(
+        provider.type,
+        sourceModel,
+        selectedProviderModelMode
+      );
+      if (migrated.model !== selectedProviderModel || migrated.mode !== selectedProviderModelMode) {
+        setSelectedProviderModel(migrated.model);
+        setSelectedProviderModelMode(migrated.mode);
+      }
+    }
+  }, [providers, providersLoaded, selectedProviderId, selectedProviderModel, selectedProviderModelMode]);
 
   async function seedBrief() {
     setBusy("seed");
@@ -428,7 +432,7 @@ export default function WikiPage() {
                 </optgroup>
                 {(["anthropic", "openai"] as const).map((type) => {
                   const provider = providersByType.get(type);
-                  const models = WIKI_PROVIDER_MODELS[type] || [];
+                  const models = WIKI_PROVIDER_MODEL_OPTIONS[type];
                   if (!provider || models.length === 0) return null;
                   return (
                     <optgroup
@@ -437,10 +441,10 @@ export default function WikiPage() {
                     >
                       {models.map((model) => (
                         <option
-                          key={`${provider.id}-${model.apiId}-${model.mode || DEFAULT_PROVIDER_MODEL_MODE}`}
-                          value={`provider:${provider.id}::${model.apiId}::${model.mode || DEFAULT_PROVIDER_MODEL_MODE}`}
+                          key={`${provider.id}-${model.apiId}-${model.mode}`}
+                          value={`provider:${provider.id}::${model.apiId}::${model.mode}`}
                         >
-                          {model.label}
+                          {model.label} — {model.pricing}
                         </option>
                       ))}
                     </optgroup>
