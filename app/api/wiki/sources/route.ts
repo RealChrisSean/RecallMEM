@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
-  const brain = req.nextUrl.searchParams.get("brain") || "sprites";
+  const brain = req.nextUrl.searchParams.get("brain") || "default";
   const sources = await listWikiSources(brain);
   return Response.json({ sources });
 }
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
       text?: string;
     };
     const result = await ingestWikiSource({
-      brain: body.brain || "sprites",
+      brain: body.brain || "default",
       title: body.title || "",
       sourceKind: body.sourceKind || "manual",
       uri: body.uri || null,

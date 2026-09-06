@@ -37,39 +37,35 @@ export type DeepgramVoiceCompatibility =
       supportedModels: string[];
     };
 
-export const BUNDLED_DEEPGRAM_VOICE_THINK_MODELS = [
+export const CURATED_DEEPGRAM_VOICE_THINK_MODELS = [
   { provider: "open_ai", model: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
   { provider: "open_ai", model: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
-  { provider: "open_ai", model: "gpt-5.2", label: "GPT 5.2" },
-  { provider: "open_ai", model: "gpt-5.4", label: "GPT 5.4" },
-  { provider: "open_ai", model: "gpt-4.1", label: "GPT-4.1" },
-  { provider: "open_ai", model: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
-  { provider: "open_ai", model: "gpt-4.1-nano", label: "GPT-4.1 Nano" },
-  { provider: "open_ai", model: "gpt-4o", label: "GPT-4o" },
-  { provider: "open_ai", model: "gpt-4o-mini", label: "GPT-4o Mini" },
-  { provider: "open_ai", model: "gpt-5", label: "GPT-5" },
-  { provider: "open_ai", model: "gpt-5-mini", label: "GPT-5 Mini" },
-  { provider: "open_ai", model: "gpt-5-nano", label: "GPT-5 Nano" },
-  { provider: "open_ai", model: "gpt-5.1-chat-latest", label: "GPT-5.1 Instant" },
-  { provider: "open_ai", model: "gpt-5.1", label: "GPT-5.1 Thinking" },
-  { provider: "open_ai", model: "gpt-5.2-chat-latest", label: "GPT-5.2 Instant" },
-  { provider: "open_ai", model: "gpt-5.3-chat-latest", label: "GPT-5.3 Instant" },
-  { provider: "open_ai", model: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
-  { provider: "open_ai", model: "gpt-5.4-nano", label: "GPT-5.4 Nano" },
-  { provider: "open_ai", model: "gpt-5.5", label: "GPT-5.5" },
   { provider: "anthropic", model: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
   { provider: "anthropic", model: "claude-sonnet-5", label: "Claude Sonnet 5" },
-  { provider: "anthropic", model: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
-  { provider: "anthropic", model: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-  { provider: "google", model: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-  { provider: "google", model: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite" },
-  { provider: "google", model: "gemini-3-flash-preview", label: "Gemini 3.0 Flash Preview" },
-  { provider: "google", model: "gemini-3-pro-preview", label: "Gemini 3.0 Pro Preview" },
-  { provider: "google", model: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
   { provider: "google", model: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
   { provider: "groq", model: "openai/gpt-oss-20b", label: "GPT OSS 20B" },
-  { provider: "nvidia", model: "nemotron-3-nano-30B-A3B", label: "Nemotron 3 Nano 30B A3B" },
+  {
+    provider: "nvidia",
+    model: "nvidia/nemotron-3-nano-30b-a3b",
+    label: "Nemotron 3 Nano 30B A3B",
+  },
 ] as const satisfies readonly DeepgramVoiceThinkModel[];
+
+export const BUNDLED_DEEPGRAM_VOICE_THINK_MODELS =
+  CURATED_DEEPGRAM_VOICE_THINK_MODELS;
+
+function voiceModelKey(model: Pick<DeepgramVoiceThinkModel, "provider" | "model">) {
+  return `${model.provider}:${model.model}`;
+}
+
+export function filterCuratedDeepgramVoiceModels(
+  availableModels: readonly DeepgramVoiceThinkModel[]
+): DeepgramVoiceThinkModel[] {
+  const availableKeys = new Set(availableModels.map(voiceModelKey));
+  return CURATED_DEEPGRAM_VOICE_THINK_MODELS
+    .filter((model) => availableKeys.has(voiceModelKey(model)))
+    .map((model) => ({ ...model }));
+}
 
 const PROVIDER_LABELS: Record<DeepgramVoiceThinkProviderType, string> = {
   open_ai: "OpenAI",
@@ -131,7 +127,7 @@ function normalizeProviderModel(
   }
 
   if (provider === "nvidia" && lastSegment.toLowerCase() === "nemotron-3-nano-30b-a3b") {
-    return "nemotron-3-nano-30B-A3B";
+    return "nvidia/nemotron-3-nano-30b-a3b";
   }
 
   if (provider === "google" || provider === "anthropic" || provider === "open_ai") {
@@ -200,6 +196,7 @@ export function getDeepgramVoiceAgentCompatibility(
   selection: VoiceAgentProviderSelection,
   models: readonly DeepgramVoiceThinkModel[] = BUNDLED_DEEPGRAM_VOICE_THINK_MODELS
 ): DeepgramVoiceCompatibility {
+  const curatedModels = filterCuratedDeepgramVoiceModels(models);
   const model = (selection.selectedModel || selection.providerModel || "").trim();
   const providerType = (selection.providerType || "").toLowerCase();
 
@@ -254,9 +251,9 @@ export function getDeepgramVoiceAgentCompatibility(
   }
 
   const normalizedModel = normalizeProviderModel(model, provider);
-  const supportedModels = supportedLabelsForProvider(provider, models);
+  const supportedModels = supportedLabelsForProvider(provider, curatedModels);
 
-  if (!isSupported(provider, normalizedModel, models)) {
+  if (!isSupported(provider, normalizedModel, curatedModels)) {
     return {
       compatible: false,
       reason: unsupportedMessage(model, provider, supportedModels),

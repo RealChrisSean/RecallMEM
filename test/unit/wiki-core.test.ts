@@ -10,8 +10,8 @@ describe("wiki source chunking", () => {
   it("chunks source text with stable line ranges", () => {
     const chunks = chunkSourceText(
       [
-        "# Sprites",
-        "Sprites expose source-grounded docs.",
+        "# Example Service",
+        "The service has source-grounded documentation.",
         "",
         "## Checkpoints",
         "A checkpoint captures state.",
@@ -27,7 +27,7 @@ describe("wiki source chunking", () => {
   });
 
   it("normalizes brain names for source namespaces", () => {
-    expect(normalizeBrainName("Sprites Wiki")).toBe("sprites-wiki");
+    expect(normalizeBrainName("Project Wiki")).toBe("project-wiki");
     expect(normalizeBrainName("")).toBe("default");
   });
 });
@@ -35,11 +35,11 @@ describe("wiki source chunking", () => {
 describe("wiki citation validation", () => {
   const chunk = {
     id: "chunk-1",
-    chunk_text: ["Sprites run with state.", "Checkpoints preserve machine state."].join("\n"),
+    chunk_text: ["The service keeps state.", "Checkpoints preserve machine state."].join("\n"),
     line_start: 10,
     line_end: 11,
     citation: citationLabel({
-      sourceTitle: "superfly/sprites-docs",
+      sourceTitle: "example/project-docs",
       sourceRef: "abcdef1234567890",
       path: "docs/checkpoints.md",
       lineStart: 10,
@@ -62,7 +62,7 @@ describe("wiki citation validation", () => {
     );
 
     expect(valid).toHaveLength(1);
-    expect(valid[0].citation).toBe("superfly/sprites-docs@abcdef123456 docs/checkpoints.md:L11-L11");
+    expect(valid[0].citation).toBe("example/project-docs@abcdef123456 docs/checkpoints.md:L11-L11");
   });
 
   it("rejects citations whose quote is not in the cited lines", () => {
@@ -73,7 +73,7 @@ describe("wiki citation validation", () => {
           chunkId: "chunk-1",
           lineStart: 10,
           lineEnd: 10,
-          quote: "Sprites secretly use Kubernetes.",
+          quote: "The service secretly uses an undocumented scheduler.",
         },
       ],
       [chunk]
@@ -90,7 +90,7 @@ describe("wiki citation validation", () => {
           chunkId: "chunk-1",
           lineStart: 9,
           lineEnd: 11,
-          quote: "Sprites run with state.",
+          quote: "The service keeps state.",
         },
       ],
       [chunk]

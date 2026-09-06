@@ -25,7 +25,7 @@ Before, the extractor could return this:
 ```json
 {
   "facts": [
-    "User lives in Los Angeles."
+    "User lives in Example City."
   ]
 }
 ```
@@ -38,8 +38,8 @@ Now the extractor has to bring a receipt:
 {
   "facts": [
     {
-      "text": "User lives in Los Angeles.",
-      "quote": "I live in Los Angeles now."
+      "text": "User lives in Example City.",
+      "quote": "I live in Example City now."
     }
   ]
 }
@@ -47,14 +47,14 @@ Now the extractor has to bring a receipt:
 
 Then TypeScript checks the quote against the transcript. If the quote is not there, the memory is rejected.
 
-This does not prove the user really lives in Los Angeles. It proves something narrower and more useful: the memory is supported by the conversation.
+This does not prove the user really lives in Example City. It proves something narrower and more useful: the memory is supported by the conversation.
 
 If the model invents:
 
 ```json
 {
-  "text": "User has three dogs.",
-  "quote": "I have three dogs."
+  "text": "User collects antique maps.",
+  "quote": "I collect antique maps."
 }
 ```
 
@@ -69,21 +69,21 @@ Receipts fix one kind of fake memory. Time fixes another.
 This sentence looks harmless:
 
 ```text
-User: My 230k job starts in 1 month.
+User: My new job starts in 1 month.
 ```
 
 Before, a model could store:
 
 ```text
-User's 230k job starts in 1 month.
+User's new job starts in 1 month.
 ```
 
 That memory gets worse every morning.
 
-RecallMEM now gives the extractor the conversation date and requires relative time to be grounded. If the conversation happened on `2026-05-23`, the memory needs to look like this:
+RecallMEM now gives the extractor the conversation date and requires relative time to be grounded. If the conversation happened on `2030-01-15`, the memory needs to look like this:
 
 ```text
-User said on 2026-05-23 that their 230k job starts around 2026-06-23.
+User said on 2030-01-15 that their new job starts around 2030-02-15.
 ```
 
 If the extractor leaves it as "in 1 month", TypeScript rejects it.

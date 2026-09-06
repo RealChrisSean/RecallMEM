@@ -6,15 +6,31 @@ describe("Deepgram voice model discovery", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses and normalizes the live model endpoint", async () => {
+  it("intersects the live model endpoint with RecallMEM's curated catalog", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      models: [{ id: "gpt-5.6-luna", name: "GPT-5.6 Luna", provider: "open_ai" }],
+      models: [
+        { id: "gpt-5.5", name: "GPT-5.5", provider: "open_ai" },
+        { id: "gpt-5.6-luna", name: "Provider-controlled label", provider: "open_ai" },
+        { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", provider: "anthropic" },
+      ],
     }), { status: 200 })));
     const { getDeepgramVoiceThinkModels } = await import("@/lib/deepgram-voice-models");
 
     await expect(getDeepgramVoiceThinkModels()).resolves.toEqual({
       source: "live",
       models: [{ model: "gpt-5.6-luna", label: "GPT-5.6 Luna", provider: "open_ai" }],
+    });
+  });
+
+  it("does not fall back to deprecated models when the live feed has no curated match", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      models: [{ id: "gpt-5.5", name: "GPT-5.5", provider: "open_ai" }],
+    }), { status: 200 })));
+    const { getDeepgramVoiceThinkModels } = await import("@/lib/deepgram-voice-models");
+
+    await expect(getDeepgramVoiceThinkModels()).resolves.toEqual({
+      source: "live",
+      models: [],
     });
   });
 
@@ -28,5 +44,8 @@ describe("Deepgram voice model discovery", () => {
       expect.objectContaining({ model: "gpt-5.6-terra" }),
       expect.objectContaining({ model: "claude-sonnet-5" }),
     ]));
+    expect(result.models.map((model) => model.model)).not.toEqual(
+      expect.arrayContaining(["gpt-5.5", "claude-sonnet-4-6", "gemini-3-flash-preview"])
+    );
   });
 });

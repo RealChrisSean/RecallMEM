@@ -105,8 +105,8 @@ describe("voice-agent save route", () => {
         model: "claude-haiku-4-5",
         workspaceMode: "wiki",
         messages: [
-          { role: "user", content: "How do Sprites expose public URLs?" },
-          { role: "assistant", content: "Sprites can expose public URLs from the docs." },
+          { role: "user", content: "How does the service expose public URLs?" },
+          { role: "assistant", content: "The source docs describe the public URL flow." },
         ],
       })
     );

@@ -7,12 +7,15 @@ import {
 describe("voice agent model compatibility", () => {
   it("keeps the bundled fallback aligned with current Deepgram labels", () => {
     const ids = BUNDLED_DEEPGRAM_VOICE_THINK_MODELS.map((row) => row.model);
-    expect(ids).toContain("gpt-5.6-terra");
-    expect(ids).toContain("gpt-5.6-luna");
-    expect(ids).toContain("claude-sonnet-5");
-    expect(ids).toContain("gemini-2.0-flash-lite");
-    expect(ids).not.toContain("claude-sonnet-4-20250514");
-    expect(ids).not.toContain("gemini-3.1-flash-lite-preview");
+    expect(ids).toEqual([
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "claude-haiku-4-5",
+      "claude-sonnet-5",
+      "gemini-3.5-flash",
+      "openai/gpt-oss-20b",
+      "nvidia/nemotron-3-nano-30b-a3b",
+    ]);
   });
   it("accepts current supported GPT models", () => {
     const result = getDeepgramVoiceAgentCompatibility({
@@ -36,14 +39,33 @@ describe("voice agent model compatibility", () => {
       providerId: "openai",
       providerType: "openai",
       providerLabel: "OpenAI",
-      providerModel: "gpt-5.5",
-      selectedModel: "gpt-5.5",
+      providerModel: "gpt-5.6-terra",
+      selectedModel: "gpt-5.6-terra",
       selectedModelMode: "openai-thinking",
     });
 
     expect(result.compatible).toBe(false);
     if (!result.compatible) {
       expect(result.reason).toContain("only supports realtime/instant");
+    }
+  });
+
+  it("rejects a deprecated model even when a provider still reports it", () => {
+    const result = getDeepgramVoiceAgentCompatibility({
+      providerId: "openai",
+      providerType: "openai",
+      providerLabel: "OpenAI",
+      providerModel: "gpt-5.5",
+      selectedModel: "gpt-5.5",
+      selectedModelMode: "instant",
+    }, [
+      ...BUNDLED_DEEPGRAM_VOICE_THINK_MODELS,
+      { provider: "open_ai", model: "gpt-5.5", label: "GPT-5.5" },
+    ]);
+
+    expect(result.compatible).toBe(false);
+    if (!result.compatible) {
+      expect(result.supportedModels).toEqual(["GPT-5.6 Terra", "GPT-5.6 Luna"]);
     }
   });
 
@@ -78,7 +100,7 @@ describe("voice agent model compatibility", () => {
     if (!result.compatible) {
       expect(result.reason).toContain("incompatible");
       expect(result.supportedModels).toEqual(
-        expect.arrayContaining(["Claude Sonnet 4.6", "Claude Haiku 4.5"])
+        expect.arrayContaining(["Claude Sonnet 5", "Claude Haiku 4.5"])
       );
     }
   });

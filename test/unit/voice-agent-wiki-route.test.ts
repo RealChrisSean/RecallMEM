@@ -38,13 +38,13 @@ describe("voice-agent wiki route", () => {
 
   it("queries public wiki sources with the selected voice model", async () => {
     mocks.answerWikiQuestion.mockResolvedValue({
-      answer: "Sprites can expose a public URL.",
+      answer: "The service can expose a public URL.",
       citations: [
         {
           marker: "C1",
-          citation: "superfly/sprites-docs@abcdef src/content/docs/working-with-sprites.mdx:L110-L110",
-          url: "https://github.com/superfly/sprites-docs/blob/abcdef/src/content/docs/working-with-sprites.mdx#L110-L110",
-          quote: "sprite url update --auth public",
+          citation: "example/project-docs@abcdef docs/networking.md:L110-L110",
+          url: "https://github.com/example/project-docs/blob/abcdef/docs/networking.md#L110-L110",
+          quote: "service expose --public",
         },
       ],
       chunks: [],
@@ -54,8 +54,8 @@ describe("voice-agent wiki route", () => {
 
     const res = await POST(
       request({
-        query: "How do I expose a Sprite publicly?",
-        brain: "sprites",
+        query: "How do I expose the service publicly?",
+        brain: "project-docs",
         socratic: true,
         providerId: "provider-anthropic",
         model: "claude-haiku-4-5",
@@ -66,8 +66,8 @@ describe("voice-agent wiki route", () => {
 
     expect(res.status).toBe(200);
     expect(mocks.answerWikiQuestion).toHaveBeenCalledWith({
-      brain: "sprites",
-      question: "How do I expose a Sprite publicly?",
+      brain: "project-docs",
+      question: "How do I expose the service publicly?",
       socratic: true,
       providerId: "provider-anthropic",
       model: "claude-haiku-4-5",
@@ -75,16 +75,37 @@ describe("voice-agent wiki route", () => {
       publicSourcesOnly: true,
     });
     expect(body).toEqual({
-      answer: "Sprites can expose a public URL.",
+      answer: "The service can expose a public URL.",
       citations: [
         {
           marker: "C1",
-          citation: "superfly/sprites-docs@abcdef src/content/docs/working-with-sprites.mdx:L110-L110",
-          url: "https://github.com/superfly/sprites-docs/blob/abcdef/src/content/docs/working-with-sprites.mdx#L110-L110",
+          citation: "example/project-docs@abcdef docs/networking.md:L110-L110",
+          url: "https://github.com/example/project-docs/blob/abcdef/docs/networking.md#L110-L110",
         },
       ],
       notInSources: false,
       validationFailed: false,
     });
+  });
+
+  it("uses the neutral default brain when no brain is selected", async () => {
+    mocks.answerWikiQuestion.mockResolvedValue({
+      answer: "I don't have that in this brain's sources.",
+      citations: [],
+      chunks: [],
+      notInSources: true,
+      llmUsed: false,
+    });
+
+    const res = await POST(request({ query: "What is documented?" }));
+
+    expect(res.status).toBe(200);
+    expect(mocks.answerWikiQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brain: "default",
+        question: "What is documented?",
+        publicSourcesOnly: true,
+      })
+    );
   });
 });

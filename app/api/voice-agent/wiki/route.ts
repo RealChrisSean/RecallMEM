@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await answerWikiQuestion({
-      brain: body.brain || "sprites",
+      brain: body.brain || "default",
       question,
       socratic: !!body.socratic,
       providerId: body.providerId || undefined,

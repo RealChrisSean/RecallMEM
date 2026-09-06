@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  BookOpen,
   Database,
   FileUp,
   GitBranch,
@@ -96,16 +95,17 @@ interface ImportResult {
 }
 
 export default function WikiPage() {
-  const [brain, setBrain] = useState("sprites");
+  const [brain, setBrain] = useState("default");
   const [sources, setSources] = useState<WikiSource[]>([]);
   const [loadingSources, setLoadingSources] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [sourceTitle, setSourceTitle] = useState("Sprites source note");
+  const [sourceTitle, setSourceTitle] = useState("");
   const [sourceUri, setSourceUri] = useState("");
   const [sourcePath, setSourcePath] = useState("notes/source.md");
   const [sourceText, setSourceText] = useState("");
-  const [question, setQuestion] = useState("Why create an LLM wiki for Sprites?");
+  const [question, setQuestion] = useState("");
+  const [repository, setRepository] = useState("");
   const [socratic, setSocratic] = useState(false);
   const [answer, setAnswer] = useState<WikiAnswer | null>(null);
   const [importResults, setImportResults] = useState<ImportResult[]>([]);
@@ -121,6 +121,11 @@ export default function WikiPage() {
     () => sources.reduce((sum, source) => sum + Number(source.chunk_count || 0), 0),
     [sources]
   );
+
+  useEffect(() => {
+    const savedBrain = localStorage.getItem("recallmem.activeBrain");
+    if (savedBrain) setBrain(savedBrain);
+  }, []);
 
   const loadSources = useCallback(async () => {
     setLoadingSources(true);
@@ -214,40 +219,23 @@ export default function WikiPage() {
     }
   }, [providers, providersLoaded, selectedProviderId, selectedProviderModel, selectedProviderModelMode]);
 
-  async function seedBrief() {
-    setBusy("seed");
-    setStatus(null);
-    try {
-      const res = await fetch("/api/wiki/seed", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brain }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Seed failed");
-      setStatus(`Seeded ${data.result.title}: ${data.result.chunks} chunk(s).`);
-      await loadSources();
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Seed failed");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function importSpritesRepos() {
+  async function importGitHubRepository() {
     setBusy("github");
-    setStatus("Importing public Sprites repositories...");
+    setStatus("Importing public GitHub repository...");
     setImportResults([]);
     try {
       const res = await fetch("/api/wiki/import-github", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brain }),
+        body: JSON.stringify({ brain, repos: [repository.trim()] }),
       });
       const data = (await res.json()) as { results?: ImportResult[]; error?: string };
       if (!res.ok) throw new Error(data.error || "Import failed");
-      setImportResults(data.results || []);
-      setStatus("GitHub import finished.");
+      const results = data.results || [];
+      setImportResults(results);
+      const failures = results.filter((result) => !result.ok);
+      setStatus(failures.length > 0 ? "GitHub import finished with errors." : "GitHub import finished.");
+      if (failures.length === 0) setRepository("");
       await loadSources();
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Import failed");
@@ -391,6 +379,7 @@ export default function WikiPage() {
               <textarea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
+                placeholder="Ask a question about this brain's sources"
                 className="h-32 w-full resize-none rounded-md border border-zinc-200 bg-white p-3 text-sm outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-950 lg:h-40"
               />
               <button
@@ -523,25 +512,25 @@ export default function WikiPage() {
         <div className="grid gap-4 lg:grid-cols-[380px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-              <h2 className="mb-3 text-sm font-semibold">Source Setup</h2>
-              <div className="grid grid-cols-2 gap-2">
+              <h2 className="mb-3 text-sm font-semibold">Import Repository</h2>
+              <label className="mb-2 block text-xs font-medium uppercase text-zinc-500">
+                Public GitHub repository
+              </label>
+              <div className="space-y-2">
+                <input
+                  value={repository}
+                  onChange={(e) => setRepository(e.target.value)}
+                  placeholder="owner/repository or GitHub URL"
+                  className="h-10 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-950"
+                />
                 <button
                   type="button"
-                  onClick={seedBrief}
-                  disabled={busy !== null}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-zinc-900 px-3 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-950"
-                >
-                  <BookOpen className="h-4 w-4" />
-                  Seed brief
-                </button>
-                <button
-                  type="button"
-                  onClick={importSpritesRepos}
-                  disabled={busy !== null}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950"
+                  onClick={importGitHubRepository}
+                  disabled={busy !== null || !repository.trim()}
+                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-zinc-900 px-3 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-950"
                 >
                   <GitBranch className="h-4 w-4" />
-                  Import repos
+                  Import
                 </button>
               </div>
             </section>

@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
       : undefined;
 
     const result = await answerWikiQuestion({
-      brain: body.brain || "sprites",
+      brain: body.brain || "default",
       question: body.question,
       socratic: !!body.socratic,
       providerId: body.providerId,

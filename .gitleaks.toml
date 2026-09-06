@@ -47,9 +47,6 @@ keywords = [
 description = "Safe examples and generated dependency metadata"
 paths = [
   '''(^|/)package-lock\.json$''',
-  '''(^|/)docs/.*\.md$''',
-  '''(^|/)README\.md$''',
-  '''(^|/)TODO\.md$''',
 ]
 regexes = [
   '''postgresql://user:password@localhost:5432/recallmem''',

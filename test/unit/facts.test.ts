@@ -45,7 +45,7 @@ describe("matchesKeyword (prefix word match)", () => {
   });
 
   it("handles multi-word phrases via substring match", () => {
-    expect(matchesKeyword("user's name is Chris", "name is")).toBe(true);
+    expect(matchesKeyword("user's name is Example User", "name is")).toBe(true);
     // Multi-word keywords use plain includes() so an exact substring is
     // required. Already specific enough for our keyword list.
     expect(matchesKeyword("user prefers tea", "name is")).toBe(false);
@@ -93,7 +93,7 @@ describe("memory review policy", () => {
 
 describe("evidence-backed fact extraction", () => {
   const transcript = `
-user: I live in Los Angeles now.
+user: I live in Example City now.
 
 assistant: Nice, I'll remember that.
 
@@ -104,8 +104,8 @@ user: I'm building RecallMEM as a local-first memory app.
     const facts = validateExtractedFactCandidates(
       [
         {
-          text: "User said they live in Los Angeles.",
-          quote: "I live in Los Angeles now.",
+          text: "User said they live in Example City.",
+          quote: "I live in Example City now.",
         },
       ],
       transcript
@@ -113,8 +113,8 @@ user: I'm building RecallMEM as a local-first memory app.
 
     expect(facts).toEqual([
       {
-        text: "User said they live in Los Angeles.",
-        supportingQuote: "I live in Los Angeles now.",
+        text: "User said they live in Example City.",
+        supportingQuote: "I live in Example City now.",
         sourceMessageIndex: null,
       },
     ]);
@@ -145,8 +145,8 @@ user: I'm building RecallMEM as a local-first memory app.
     const facts = validateExtractedFactCandidates(
       [
         {
-          text: "User has three dogs.",
-          quote: "I have three dogs.",
+          text: "User collects antique maps.",
+          quote: "I collect antique maps.",
         },
       ],
       transcript
@@ -157,7 +157,7 @@ user: I'm building RecallMEM as a local-first memory app.
 
   it("rejects legacy string facts because they have no evidence", () => {
     const facts = validateExtractedFactCandidates(
-      ["User lives in Los Angeles."],
+      ["User lives in Example City."],
       transcript
     );
 
@@ -176,7 +176,7 @@ user: I'm building RecallMEM as a local-first memory app.
   it("matches quotes case-insensitively", () => {
     expect(
       quoteAppearsInTranscript(
-        "i live in los angeles now.",
+        "i live in example city now.",
         transcript
       )
     ).toBe(true);
@@ -191,7 +191,7 @@ user: I'm building RecallMEM as a local-first memory app.
       [
         {
           text: "User tested the mic.",
-          quote: "I live in Los Angeles now.",
+          quote: "I live in Example City now.",
         },
       ],
       transcript
@@ -203,20 +203,20 @@ user: I'm building RecallMEM as a local-first memory app.
 
 describe("temporal grounding for extracted facts", () => {
   const transcript = `
-user: My 230k job starts in 1 month.
+user: My new job starts in 1 month.
 
 assistant: That's huge.
 `;
 
   it("detects relative time phrases", () => {
     expect(hasRelativeTime("User's job starts in 1 month.")).toBe(true);
-    expect(hasRelativeTime("User currently has 90k in liquidity.")).toBe(true);
-    expect(hasRelativeTime("User's job starts on 2026-06-23.")).toBe(false);
+    expect(hasRelativeTime("User currently has a release in progress.")).toBe(true);
+    expect(hasRelativeTime("User's job starts on 2030-02-15.")).toBe(false);
   });
 
   it("detects concrete dates", () => {
-    expect(hasConcreteDate("User said this on 2026-05-23.")).toBe(true);
-    expect(hasConcreteDate("User's job starts around June 2026.")).toBe(true);
+    expect(hasConcreteDate("User said this on 2030-01-15.")).toBe(true);
+    expect(hasConcreteDate("User's job starts around February 2030.")).toBe(true);
     expect(hasConcreteDate("User's job starts in 1 month.")).toBe(false);
   });
 
@@ -224,14 +224,14 @@ assistant: That's huge.
     expect(hasUngroundedRelativeTime("User's job starts in 1 month.")).toBe(true);
     expect(
       hasUngroundedRelativeTime(
-        "User said on 2026-05-23 that their job starts around 2026-06-23."
+        "User said on 2030-01-15 that their job starts around 2030-02-15."
       )
     ).toBe(false);
   });
 
   it("allows relative time only when the fact text includes a concrete anchor", () => {
     expect(
-      hasUngroundedRelativeTime("User currently has 90k in liquidity as of 2026-05-23.")
+      hasUngroundedRelativeTime("User currently has a release in progress as of 2030-01-15.")
     ).toBe(false);
   });
 
@@ -239,8 +239,8 @@ assistant: That's huge.
     const facts = validateExtractedFactCandidates(
       [
         {
-          text: "User's 230k job starts in 1 month.",
-          quote: "My 230k job starts in 1 month.",
+          text: "User's new job starts in 1 month.",
+          quote: "My new job starts in 1 month.",
         },
       ],
       transcript
@@ -253,8 +253,8 @@ assistant: That's huge.
     const facts = validateExtractedFactCandidates(
       [
         {
-          text: "User said on 2026-05-23 that their 230k job starts around 2026-06-23.",
-          quote: "My 230k job starts in 1 month.",
+          text: "User said on 2030-01-15 that their new job starts around 2030-02-15.",
+          quote: "My new job starts in 1 month.",
         },
       ],
       transcript
@@ -262,8 +262,8 @@ assistant: That's huge.
 
     expect(facts).toEqual([
       {
-        text: "User said on 2026-05-23 that their 230k job starts around 2026-06-23.",
-        supportingQuote: "My 230k job starts in 1 month.",
+        text: "User said on 2030-01-15 that their new job starts around 2030-02-15.",
+        supportingQuote: "My new job starts in 1 month.",
         sourceMessageIndex: null,
       },
     ]);

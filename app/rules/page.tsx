@@ -8,7 +8,7 @@ import { Logo } from "@/components/Logo";
 const PLACEHOLDER = `Examples of rules you might set:
 
 - Don't gaslight me. If I'm wrong, just say so directly.
-- I have dyslexia. Avoid bullet-heavy responses, prefer plain prose with one idea per paragraph.
+- Keep responses easy to scan. Prefer short paragraphs with one idea per paragraph.
 - Don't add disclaimers like "I'm not a lawyer" or "consult a professional" unless I ask.
 - When I ask for code, just give me the code. No long explanations unless I ask.
 - Match my tone. If I'm casual, be casual. If I'm precise, be precise.

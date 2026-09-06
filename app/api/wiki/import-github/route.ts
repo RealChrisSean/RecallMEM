@@ -12,13 +12,6 @@ export const maxDuration = 300;
 
 const execFileAsync = promisify(execFile);
 
-const DEFAULT_REPOS = [
-  "superfly/sprites-docs",
-  "superfly/sprites-go",
-  "superfly/sprites-js",
-  "superfly/sprites-ex",
-];
-
 const TEXT_EXTENSIONS = new Set([
   ".md",
   ".mdx",
@@ -53,16 +46,27 @@ const SKIP_DIRS = new Set([
 
 const MAX_FILE_BYTES = 220_000;
 const MAX_FILES_PER_REPO = 120;
+const MAX_REPOS_PER_IMPORT = 8;
 
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as {
     brain?: string;
     repos?: string[];
   };
-  const brain = body.brain || "sprites";
-  const repos = (body.repos && body.repos.length > 0 ? body.repos : DEFAULT_REPOS)
-    .map((repo) => repo.trim())
-    .filter(Boolean);
+  const brain = body.brain || "default";
+  const requestedRepos = Array.isArray(body.repos)
+    ? body.repos.filter((repo): repo is string => typeof repo === "string")
+    : [];
+  const repos = Array.from(
+    new Set(requestedRepos.map(normalizeGitHubRepo).filter(Boolean))
+  ).slice(0, MAX_REPOS_PER_IMPORT);
+
+  if (repos.length === 0) {
+    return Response.json(
+      { ok: false, error: "At least one public GitHub repository is required." },
+      { status: 400 }
+    );
+  }
 
   const results = [];
   for (const repo of repos) {
@@ -78,6 +82,14 @@ export async function POST(req: NextRequest) {
   }
 
   return Response.json({ ok: true, results });
+}
+
+function normalizeGitHubRepo(value: string): string {
+  return value
+    .trim()
+    .replace(/^https?:\/\/github\.com\//i, "")
+    .replace(/\.git$/i, "")
+    .replace(/\/$/, "");
 }
 
 async function importRepo(brain: string, repo: string) {

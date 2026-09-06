@@ -60,10 +60,9 @@ describe("voice-agent route", () => {
       models: [
         { provider: "open_ai", model: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
         { provider: "open_ai", model: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
-        { provider: "open_ai", model: "gpt-5.5", label: "GPT-5.5" },
         { provider: "anthropic", model: "claude-sonnet-5", label: "Claude Sonnet 5" },
         { provider: "anthropic", model: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
-        { provider: "google", model: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+        { provider: "google", model: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
       ],
     });
 
@@ -91,7 +90,7 @@ describe("voice-agent route", () => {
       id: "provider-openai",
       label: "OpenAI",
       type: "openai",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       base_url: "https://api.openai.com",
       api_key: "secret",
       user_id: "local-user",
@@ -99,14 +98,14 @@ describe("voice-agent route", () => {
     });
 
     const res = await POST(
-      request({ providerId: "provider-openai", model: "gpt-5.5", messages: [] })
+      request({ providerId: "provider-openai", model: "gpt-5.6-terra", messages: [] })
     );
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.thinkModel).toBe("gpt-5.5");
+    expect(body.thinkModel).toBe("gpt-5.6-terra");
     expect(body.thinkProviderId).toBe("provider-openai");
-    expect(body.thinkModelLabel).toBe("gpt-5.5 via OpenAI");
+    expect(body.thinkModelLabel).toBe("gpt-5.6-terra via OpenAI");
     expect(body.listenModel).toBe("flux-general-en");
     expect(body.listenModelLabel).toBe("Flux");
     expect(body.settings.agent.listen.provider).toMatchObject({
@@ -115,14 +114,14 @@ describe("voice-agent route", () => {
       model: "flux-general-en",
     });
     expect(body.settings.agent.listen.provider.keyterms).toEqual(
-      expect.arrayContaining(["RecallMEM", "pgvector", "Fly.io", "Deepgram", "Sprite", "gpt-5.5", "OpenAI"])
+      expect.arrayContaining(["RecallMEM", "pgvector", "Fly.io", "Deepgram", "Sprite", "gpt-5.6-terra", "OpenAI"])
     );
     expect(body.listenKeyterms).toEqual(body.settings.agent.listen.provider.keyterms);
     expect(body.voiceSpeed).toBe(1);
     expect(body.settings.agent.think).toHaveLength(3);
     expect(body.settings.agent.think[0].provider).toEqual({
       type: "open_ai",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
     });
     expect(body.settings.agent.think[1].provider).toEqual({
       type: "open_ai",
@@ -148,7 +147,7 @@ describe("voice-agent route", () => {
       id: "provider-openai",
       label: "OpenAI",
       type: "openai",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       base_url: "https://api.openai.com",
       api_key: "secret",
       user_id: "local-user",
@@ -158,9 +157,9 @@ describe("voice-agent route", () => {
     const res = await POST(
       request({
         providerId: "provider-openai",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         workspaceMode: "wiki",
-        wikiBrain: "sprites",
+        wikiBrain: "project-docs",
         messages: [
           { role: "user", content: "A private prior chat message" },
           { role: "assistant", content: "A private prior answer" },
@@ -178,13 +177,14 @@ describe("voice-agent route", () => {
     expect(functions).toHaveLength(1);
     expect(functions[0].name).toBe("query_wiki");
     expect(body.settings.agent.context).toBeUndefined();
-    expect(body.settings.agent.greeting).toBe(
-      "Wiki voice is ready. Ask me about Fly.io Sprites."
-    );
+    expect(body.settings.agent.greeting).toBe("Wiki voice is ready. Ask me about this wiki.");
     expect(body.settings.agent.think[0].prompt).toContain("RecallMEM Wiki Voice Mode");
     expect(body.settings.agent.think[0].prompt).toContain("public wiki sources only");
-    expect(body.settings.agent.think[0].prompt).toContain("Fly.io Sprites");
-    expect(body.settings.agent.think[0].prompt).toContain('"So why Sprite?"');
+    expect(body.settings.agent.think[0].prompt).toContain('selected "project-docs" wiki brain');
+    expect(body.settings.agent.think[0].prompt).toContain(
+      "Never substitute a product or subject"
+    );
+    expect(body.settings.agent.think[0].prompt).not.toContain("Fly.io Sprites");
     expect(body.settings.agent.think[0].prompt).toContain("call query_wiki before answering");
     expect(body.settings.agent.think[0].prompt).toContain(
       "Do not say \"let me search/check the wiki\""
@@ -201,7 +201,7 @@ describe("voice-agent route", () => {
       id: "provider-openai",
       label: "OpenAI",
       type: "openai",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       base_url: "https://api.openai.com",
       api_key: "secret",
       user_id: "local-user",
@@ -211,7 +211,7 @@ describe("voice-agent route", () => {
     const res = await POST(
       request({
         providerId: "provider-openai",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         workspaceMode: "study",
         privateMode: true,
         messages: [],
@@ -228,12 +228,12 @@ describe("voice-agent route", () => {
     expect(body.settings.agent.think[0].prompt).not.toContain("search_memory");
   });
 
-  it("rejects GPT Pro because realtime voice needs an instant model selection", async () => {
+  it("rejects GPT reasoning because realtime voice needs an instant model selection", async () => {
     mocks.getProvider.mockResolvedValue({
       id: "provider-openai",
       label: "OpenAI",
       type: "openai",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       base_url: "https://api.openai.com",
       api_key: "secret",
       user_id: "local-user",
@@ -243,8 +243,8 @@ describe("voice-agent route", () => {
     const res = await POST(
       request({
         providerId: "provider-openai",
-        model: "gpt-5.5-pro",
-        modelMode: "openai-pro",
+        model: "gpt-5.6-terra",
+        modelMode: "openai-thinking",
         messages: [],
       })
     );
@@ -329,7 +329,7 @@ describe("voice-agent route", () => {
       id: "provider-openai",
       label: "OpenAI",
       type: "openai",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       base_url: "https://api.openai.com",
       api_key: "secret",
       user_id: "local-user",
@@ -337,7 +337,7 @@ describe("voice-agent route", () => {
     });
 
     const res = await POST(
-      request({ providerId: "provider-openai", model: "gpt-5.5", messages: [] })
+      request({ providerId: "provider-openai", model: "gpt-5.6-terra", messages: [] })
     );
     const body = await res.json();
 
@@ -387,7 +387,7 @@ describe("voice-agent route", () => {
       id: "provider-openai",
       label: "OpenAI",
       type: "openai",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       base_url: "https://api.openai.com",
       api_key: "secret",
       user_id: "local-user",
@@ -416,7 +416,7 @@ describe("voice-agent route", () => {
     ]);
 
     const res = await POST(
-      request({ providerId: "provider-openai", model: "gpt-5.5", messages: [] })
+      request({ providerId: "provider-openai", model: "gpt-5.6-terra", messages: [] })
     );
     const body = await res.json();
     const keyterms = body.settings.agent.listen.provider.keyterms as string[];
@@ -444,7 +444,7 @@ describe("voice-agent route", () => {
       id: "provider-openai",
       label: "OpenAI",
       type: "openai",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       base_url: "https://api.openai.com",
       api_key: "secret",
       user_id: "local-user",
@@ -465,7 +465,7 @@ describe("voice-agent route", () => {
     const res = await POST(
       request({
         providerId: "provider-openai",
-        model: "gpt-5.5",
+        model: "gpt-5.6-terra",
         privateMode: true,
         messages: [],
       })
@@ -487,7 +487,7 @@ describe("voice-agent route", () => {
       id: "provider-openai",
       label: "OpenAI",
       type: "openai",
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       base_url: "https://api.openai.com",
       api_key: "secret",
       user_id: "local-user",
@@ -518,7 +518,7 @@ describe("voice-agent route", () => {
       content: `Message ${index}\n${"long transcript chunk ".repeat(500)}`,
     }));
     const res = await POST(
-      request({ providerId: "provider-openai", model: "gpt-5.5", messages })
+      request({ providerId: "provider-openai", model: "gpt-5.6-terra", messages })
     );
     const body = await res.json();
 
@@ -557,7 +557,7 @@ describe("voice-agent route", () => {
       id: "provider-gemini",
       label: "Gemini",
       type: "openai-compatible",
-      model: "google/gemini-2.5-flash",
+      model: "google/gemini-3.5-flash",
       base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
       api_key: "secret",
       user_id: "local-user",
@@ -567,17 +567,17 @@ describe("voice-agent route", () => {
     const res = await POST(
       request({
         providerId: "provider-gemini",
-        model: "google/gemini-2.5-flash",
+        model: "google/gemini-3.5-flash",
         messages: [],
       })
     );
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.thinkModelLabel).toBe("gemini-2.5-flash via Google");
+    expect(body.thinkModelLabel).toBe("gemini-3.5-flash via Google");
     expect(body.settings.agent.think[0].provider).toEqual({
       type: "google",
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
     });
     expect(body.settings.agent.think[1].provider).toEqual({
       type: "open_ai",

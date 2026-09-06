@@ -39,7 +39,7 @@ describe("extractFactsWithSupersession", () => {
       JSON.stringify({
         facts: [
           {
-            text: "User said on 2026-05-23 that their job starts around 2026-06-23.",
+            text: "User said on 2030-01-15 that their job starts around 2030-02-15.",
             quote: "My job starts in 1 month.",
           },
         ],
@@ -49,15 +49,15 @@ describe("extractFactsWithSupersession", () => {
 
     const result = await extractFactsWithSupersession(
       `user: My job starts in 1 month.\nassistant: That's huge and exciting.${filler}`,
-      { conversationDate: "2026-05-23T12:00:00.000Z" }
+      { conversationDate: "2030-01-15T12:00:00.000Z" }
     );
 
     const prompt = mocks.chat.mock.calls[0]?.[0]?.[0]?.content;
-    expect(prompt).toContain("CONVERSATION DATE:\n2026-05-23");
+    expect(prompt).toContain("CONVERSATION DATE:\n2030-01-15");
     expect(prompt).toContain("No quote, no memory");
     expect(result.facts).toEqual([
       {
-        text: "User said on 2026-05-23 that their job starts around 2026-06-23.",
+        text: "User said on 2030-01-15 that their job starts around 2030-02-15.",
         supportingQuote: "My job starts in 1 month.",
         sourceMessageIndex: null,
       },
@@ -74,17 +74,17 @@ describe("extractFactsWithSupersession", () => {
     mocks.chat.mockResolvedValue(
       JSON.stringify({
         facts: [
-          "User lives in Los Angeles.",
+          "User lives in Example City.",
           {
-            text: "User has three dogs.",
-            quote: "I have three dogs.",
+            text: "User collects antique maps.",
+            quote: "I collect antique maps.",
           },
           {
             text: "User's job starts in 1 month.",
             quote: "My job starts in 1 month.",
           },
           {
-            text: "User said on 2026-05-23 that their job starts around 2026-06-23.",
+            text: "User said on 2030-01-15 that their job starts around 2030-02-15.",
             quote: "My job starts in 1 month.",
           },
         ],
@@ -94,13 +94,13 @@ describe("extractFactsWithSupersession", () => {
 
     const result = await extractFactsWithSupersession(
       `user: My job starts in 1 month.\nassistant: Nice.${filler}`,
-      { conversationDate: "2026-05-23" }
+      { conversationDate: "2030-01-15" }
     );
 
     expect(result).toEqual({
       facts: [
         {
-          text: "User said on 2026-05-23 that their job starts around 2026-06-23.",
+          text: "User said on 2030-01-15 that their job starts around 2030-02-15.",
           supportingQuote: "My job starts in 1 month.",
           sourceMessageIndex: null,
           supersedes: ["11111111-1111-1111-1111-111111111111"],
@@ -142,7 +142,7 @@ describe("extractFactsWithSupersession", () => {
 
     const result = await extractFactsWithSupersession(
       `user: I left Acme in 2026. I am learning Rust.\nassistant: Understood.${filler}`,
-      { conversationDate: "2026-05-23" }
+      { conversationDate: "2030-01-15" }
     );
 
     expect(result.facts[0]?.supersedes).toEqual([
@@ -158,8 +158,8 @@ describe("extractFactsWithSupersession", () => {
     mocks.chat.mockResolvedValue("I cannot help with that.");
 
     const result = await extractFactsWithSupersession(
-      `user: I live in Los Angeles now.\nassistant: Nice, I'll remember that.${filler}`,
-      { conversationDate: "2026-05-23" }
+      `user: I live in Example City now.\nassistant: Nice, I'll remember that.${filler}`,
+      { conversationDate: "2030-01-15" }
     );
 
     expect(result).toEqual({ facts: [], supersedes: [] });

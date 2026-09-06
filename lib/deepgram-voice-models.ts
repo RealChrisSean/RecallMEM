@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   BUNDLED_DEEPGRAM_VOICE_THINK_MODELS,
+  filterCuratedDeepgramVoiceModels,
   type DeepgramVoiceThinkModel,
   type DeepgramVoiceThinkProviderType,
 } from "@/lib/voice-agent-models";
@@ -53,12 +54,15 @@ export async function getDeepgramVoiceThinkModels(): Promise<{
     });
     if (!response.ok) throw new Error(`Deepgram returned ${response.status}`);
     const body = (await response.json()) as { models?: unknown[] };
-    const models = (body.models || []).filter(isVoiceModel).map((row) => ({
+    const availableModels = (body.models || []).filter(isVoiceModel).map((row) => ({
       provider: row.provider,
       model: row.id,
       label: row.name,
     }));
-    if (models.length === 0) throw new Error("Deepgram returned no think models");
+    if (availableModels.length === 0) {
+      throw new Error("Deepgram returned no think models");
+    }
+    const models = filterCuratedDeepgramVoiceModels(availableModels);
     cachedModels = models;
     cachedAt = Date.now();
     return { models, source: "live" };

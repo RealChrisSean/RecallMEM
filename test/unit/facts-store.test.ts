@@ -45,8 +45,8 @@ describe("storeFacts", () => {
     const inserted = await storeFacts(
       [
         {
-          text: "User said they live in Los Angeles.",
-          supportingQuote: "I live in Los Angeles now.",
+          text: "User said they live in Example City.",
+          supportingQuote: "I live in Example City now.",
           sourceMessageIndex: 3,
         },
       ],
@@ -63,10 +63,10 @@ describe("storeFacts", () => {
     expect(String(insertCall?.[0])).toContain("source_message_index");
     expect(insertCall?.[1]).toEqual([
       "test-user",
-      "User said they live in Los Angeles.",
+      "User said they live in Example City.",
       "identity",
       "11111111-1111-1111-1111-111111111111",
-      "I live in Los Angeles now.",
+      "I live in Example City now.",
       3,
       "[0.1,0.2,0.3]",
     ]);

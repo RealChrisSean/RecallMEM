@@ -21,7 +21,7 @@ export function AppFooter({
           >
             Chris Dabatos
           </a>
-          . Made with code &amp; caffeine in Las Vegas.
+          . Made with code &amp; caffeine.
         </p>
         <div className="flex items-center gap-3">
           <SocialLink

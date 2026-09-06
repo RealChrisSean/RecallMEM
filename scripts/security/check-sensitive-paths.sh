@@ -38,13 +38,19 @@ while IFS= read -r path; do
     *.pem|*.key|*.p12|*.pfx)
       violations+=("$path")
       ;;
-    *.db|*.sqlite|*.sqlite3)
+    *.db|*.sqlite|*.sqlite3|*.dump|*.pgdump|*.backup|*.sql.bak|*.sql.gz)
       violations+=("$path")
       ;;
     dump.sql|backup.sql|*dump*.sql|*backup*.sql)
       violations+=("$path")
       ;;
-    data/*|*/data/*|exports/*|*/exports/*|personal-data/*|*/personal-data/*)
+    data/*|*/data/*|pgdata/*|*/pgdata/*|postgres-data/*|*/postgres-data/*|recallmem-data/*|*/recallmem-data/*|uploads/*|*/uploads/*|wiki-data/*|*/wiki-data/*|transcripts/*|*/transcripts/*|backups/*|*/backups/*|dumps/*|*/dumps/*|exports/*|*/exports/*|personal-data/*|*/personal-data/*)
+      violations+=("$path")
+      ;;
+    memory-export*.json|*/memory-export*.json|recallmem-export*.json|*/recallmem-export*.json|wiki-export*.json|*/wiki-export*.json|chat-export*.json|*/chat-export*.json|fact-export*.json|*/fact-export*.json|profile-export*.json|*/profile-export*.json|transcript-export*.json|*/transcript-export*.json)
+      violations+=("$path")
+      ;;
+    .pgpass|.pg_service.conf|*/.pgpass|*/.pg_service.conf)
       violations+=("$path")
       ;;
   esac

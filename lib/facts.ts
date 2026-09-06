@@ -346,12 +346,12 @@ DO NOT extract:
 - Things the AI said
 - Speculation or things not directly stated by the user
 
-Each fact should be a complete, standalone statement (8-25 words). Use third person ("User's wife is named Sarah" not "My wife is Sarah").
+Each fact should be a complete, standalone statement (8-25 words). Use third person ("User prefers concise answers" not "I prefer concise answers").
 
 Return ONLY a JSON array of fact strings. No commentary, no markdown, no code blocks. Just the raw JSON array.
 
 Example output:
-["User's name is Chris", "User lives in Los Angeles", "User has dyslexia and prefers plain language explanations"]
+["User's display name is Example User", "User lives in Example City", "User prefers concise explanations"]
 
 CONVERSATION TRANSCRIPT:
 ${transcript}
@@ -425,7 +425,7 @@ ${conversationDate}
 
 EXTRACT new facts that are durable and personal:
 - Identity, family, work, health, interests, goals, opinions, projects
-- Each fact: 8-25 words, third person ("User's wife is Sarah", not "My wife is Sarah")
+- Each fact: 8-25 words, third person ("User prefers concise answers", not "I prefer concise answers")
 - Each fact MUST include a short exact quote from the transcript that supports it
 - If a fact is based on relative time ("today", "yesterday", "next week", "in 1 month"), resolve it using the conversation date
 - The fact text must not contain unanchored relative time like "soon", "currently", "next week", or "in 1 month" unless it also includes a concrete date
@@ -444,7 +444,7 @@ SUPERSEDE existing facts when the new conversation makes them no longer true:
 - Be conservative: only mark a fact superseded if the new information clearly replaces it. If both can still be true (e.g. "User likes coffee" + "User likes tea"), do NOT supersede.
 
 Return ONLY this JSON object, no commentary, no code blocks:
-{"facts": [{"text": "User lives in Los Angeles", "quote": "I live in Los Angeles", "supersedes": ["uuid-of-old-fact"]}]}
+{"facts": [{"text": "User lives in Example City", "quote": "I live in Example City", "supersedes": ["uuid-of-old-fact"]}]}
 
 Put each replaced fact ID on the specific new fact that replaces it. Do not return a separate top-level supersedes list.
 

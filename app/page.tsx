@@ -694,10 +694,7 @@ export default function ChatPage() {
   const noChatBackend = modelsLoaded && !hasGemmaInstalled && !hasCloudProvider;
   const isBusy = isStreaming;
   const composerDisabled = noChatBackend;
-  const selectedWikiBrain =
-    activeBrain === "default" && brains.some((brain) => brain.name === "sprites")
-      ? "sprites"
-      : activeBrain;
+  const selectedWikiBrain = activeBrain;
   const selectedVoiceProvider = selectedProviderId
     ? customProviders.find((p) => p.id === selectedProviderId) || null
     : null;
@@ -1447,10 +1444,6 @@ export default function ChatPage() {
     setMessages([...newMessages, { role: "assistant", content: "" }]);
 
     if (workspaceMode !== "chat") {
-      const wikiBrain =
-        activeBrain === "default" && brains.some((brain) => brain.name === "sprites")
-          ? "sprites"
-          : activeBrain;
       try {
         const abort = new AbortController();
         abortRef.current = abort;
@@ -1458,7 +1451,7 @@ export default function ChatPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            brain: wikiBrain,
+            brain: activeBrain,
             question: messageContent,
             socratic: workspaceMode === "study",
             publicSourcesOnly: true,
