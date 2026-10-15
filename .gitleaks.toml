@@ -19,6 +19,12 @@ keywords = [
 ]
 
 [[rules]]
+id = "recallmem-typesafe-key"
+description = "TypeSafe API key"
+regex = '''apikey_[a-fA-F0-9]{32}_[a-fA-F0-9]{64}'''
+keywords = ["apikey_"]
+
+[[rules]]
 id = "recallmem-postgres-url"
 description = "Postgres connection URLs should never be committed"
 regex = '''(?i)\bpostgres(?:ql)?://[A-Za-z0-9._~%!$&'()*+,;=:-]+:[A-Za-z0-9._~%!$&'()*+,;=:-]+@[A-Za-z0-9._~%!$&'()*+,;=:-]+/[A-Za-z0-9._~%!$&'()*+,;=:-]+'''
